@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+
+<head>
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/css/index.css">
+</head>
+
+<body>
+  <div class="member">
+    <form method="GET" action="/scraping">
+      <p>検索ワード<input type="text" name="field" size="40" ></p>
+      <input type="date" name="from" ></input>
+      <input type="date" name="to" ></input>
+      <button type="submit">出力</button>
+    </form>
+  </div>
+</body>
+
+</html>
