@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def hello():
-    return render_template('layout.html', title='twitter_get')
+    return render_template('layout.html', title='search_youtube')
 
 # ↓ /scrapingをGETメソッドで受け取った時の処理
 @app.route('/scraping', methods=['GET', 'POST'])
