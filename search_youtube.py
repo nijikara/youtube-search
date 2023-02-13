@@ -4,7 +4,6 @@ import requests
 import json
 import datetime
 import common
-import get_comment
 
 #-------↓パラメータ入力↓-------
 def search_youtube(key_word,publishedAfter,publishedBefore):

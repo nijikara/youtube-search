@@ -1,16 +1,16 @@
 import requests
 import json
-
-URL = 'https://www.googleapis.com/youtube/v3/'
-# ここにAPI KEYを入力
-# API_KEY = 'AIzaSyD-0yP4hiqHw9veXw4D6SOrJRsSl8HRMRs'
-API_KEY = 'AIzaSyBllr33kDa8wA77U7lc8vECrT9kgYvU5uM'
-# ここにVideo IDを入力
-VIDEO_ID = 'Video IDを入力'
+import os
+from dotenv import load_dotenv
 
 def print_video_comment(no, video_id, next_page_token):
+      
+  load_dotenv('.env') 
+
+  url = os.environ.get("URL")
+  api_key = os.environ.get("API_KEY")
   params = {
-    'key': API_KEY,
+    'key': api_key,
     'part': 'snippet',
     'videoId': video_id,
     'order': 'relevance',
@@ -19,7 +19,7 @@ def print_video_comment(no, video_id, next_page_token):
   }
   if next_page_token is not None:
     params['pageToken'] = next_page_token
-  response = requests.get(URL + 'commentThreads', params=params)
+  response = requests.get(url + 'commentThreads', params=params)
   resource = response.json()
   comments = []
 
@@ -45,9 +45,9 @@ def print_video_comment(no, video_id, next_page_token):
     print_video_comment(no, video_id, resource["nextPageToken"])
   return comments
 
-def print_video_reply(no, cno, video_id, next_page_token, id):
+def print_video_reply(no, cno, video_id, next_page_token, id,api_key):
   params = {
-    'key': API_KEY,
+    'key': api_key,
     'part': 'snippet',
     'videoId': video_id,
     'textFormat': 'plaintext',
@@ -71,9 +71,9 @@ def print_video_reply(no, cno, video_id, next_page_token, id):
     cno = cno + 1
 
   if 'nextPageToken' in resource:
-    print_video_reply(no, cno, video_id, resource["nextPageToken"], id)
+    print_video_reply(no, cno, video_id, resource["nextPageToken"], id,api_key)
 
-def get_comment(APIKEY,video_id):
+def get_comment(api_key,video_id):
     # コメントを全取得する
     no = 1
     return print_video_comment(no, video_id, None)
