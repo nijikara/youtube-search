@@ -4,12 +4,18 @@ import requests
 import json
 import datetime
 import common
+import os
+from dotenv import load_dotenv
 
 #-------↓パラメータ入力↓-------
 def search_youtube(key_word,publishedAfter,publishedBefore):
+    
+    
+      
+    load_dotenv('.env') 
 
-    APIKEY = 'AIzaSyD-0yP4hiqHw9veXw4D6SOrJRsSl8HRMRs'
-    # APIKEY = 'AIzaSyBllr33kDa8wA77U7lc8vECrT9kgYvU5uM'
+    url = os.environ.get("URL")
+    api_key = os.environ.get("API_KEY")
     # key_word = 'ゲーム'
     regionCode = 'JP'
     # 検索日時from
@@ -49,7 +55,7 @@ def search_youtube(key_word,publishedAfter,publishedBefore):
             'type':'video',
             'channelId':channelId,
             'pageToken':nextPageToken,
-            'key':APIKEY
+            'key':api_key
         }
         #videoCategoryIdはブランクでパラメータを渡すとエラーになるので値がある時のみパラメータ付ける
         if not videoCategoryId:
@@ -57,7 +63,7 @@ def search_youtube(key_word,publishedAfter,publishedBefore):
         else:
             param['videoCategoryId'] = videoCategoryId
 
-        target_url = 'https://www.googleapis.com/youtube/v3/search?'+urllib.parse.urlencode(param)
+        target_url = url + 'search?'+urllib.parse.urlencode(param)
         print(target_url)
         req = urllib.request.Request(target_url)
         try:
@@ -78,9 +84,9 @@ def search_youtube(key_word,publishedAfter,publishedBefore):
                 param = {
                     'part':'snippet,statistics',
                     'id':",".join(video_list),
-                    'key':APIKEY
+                    'key':api_key
                 }
-                target_url = 'https://www.googleapis.com/youtube/v3/videos?'+(urllib.parse.urlencode(param))
+                target_url = url + 'videos?'+(urllib.parse.urlencode(param))
                 req = urllib.request.Request(target_url)
                 print(target_url)
                 try:
@@ -109,9 +115,9 @@ def search_youtube(key_word,publishedAfter,publishedBefore):
                 param = {
                     'part':'snippet,statistics',
                     'id':",".join(channels_list),
-                    'key':APIKEY
+                    'key':api_key
                 }
-                target_url = 'https://www.googleapis.com/youtube/v3/channels?'+(urllib.parse.urlencode(param))
+                target_url = url + 'channels?'+(urllib.parse.urlencode(param))
                 print(target_url)
                 req = urllib.request.Request(target_url)
 
