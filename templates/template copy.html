@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>youtube_search_result</title>
+<title>search_youtube</title>
 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
 <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
@@ -10,14 +10,17 @@
 <style>
 #fav-table th {
     background-color:pink;
-    white-space: nowrap;
-    width: 100px;
-}
-#fav-table table {
-    width: 100%;
 }
 </style>
-<script>$(document).ready(function() {$('#fav-table').tablesorter();});</script>
+<script>
+    $(document).ready(function() {
+    var exp = /(\b(https?|ftp|file):\/\/www.youtube.com[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+    $('body').html($('body').html().replace(exp,"<a href='$1' target='_blank'><img  height='20' src='images/logo.svg'></a>"));
+    var exp = /(\b(https?|ftp|file):\/\/t.co[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+    $('body').html($('body').html().replace(exp,"<a href='$1' target='_blank'>$1</a>"));
+    $('#fav-table').tablesorter();
+});
+</script>
 </head>
 <body>
 <div class="card-body">

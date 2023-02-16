@@ -3,7 +3,7 @@ import json
 import os
 from dotenv import load_dotenv
 
-def print_video_comment(no, video_id, next_page_token):
+def print_video_comment(url,no, video_id, next_page_token):
       
   load_dotenv('.env') 
 

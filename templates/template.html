@@ -12,13 +12,49 @@
     background-color:pink;
 }
 </style>
-<script>$(document).ready(function() {$('#fav-table').tablesorter();});</script>
+<script>
+    $(document).ready(function() {
+        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        $('body').html($('body').html().replace(exp,"<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>"));
+
+        $('#fav-table').tablesorter();
+        $('.text-content').each(function(){
+            var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
+            var exp = /(\https:\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            var txt = $(this).text();
+            txt = txt.replace(exp_hash,"<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>")
+            txt = txt.replace(exp,"<a href='$1' target='_blank'>$1</a>")
+            $(this).html(txt);
+        });
+    });
+</script>
 </head>
 <body>
 <div class="card-body">
     <table id="fav-table" class="table table-bordered">
-        <thead><tr><th>タイトル</th><th sortable>概要</th><th>再生数</th><th>投稿日時</th><th>サムネイルURL</th><th>サムネイル</th><th>URL</th><th>チャンネル名</th><th>登録者数</th><th>チャンネルURL</th></tr></thead>
-        {{ sorce }}
+        <thead><tr><th>投稿日時</th><th>タイトル</th><th sortable>概要</th><th>再生数</th><th>高評価数</th><th>コメント数</th><th>サムネイル</th>
+            <th>URL</th><th>チャンネル名</th><th>登録者数</th><th>チャンネルURL</th></tr></thead>
+            {% for dict in sorce %}
+            <tr>
+                {% for info in dict %}
+                <td>
+                    {% if info =='thumbnails' %}
+                        <a href="{{dict[info]}}" target="_blank">
+                            <img src="{{dict[info]}}" height="100">
+                        </a>
+                    {% elif info =='channel_icon' %}
+                        <a href="{{dict['channel_icon'][0]}}" target="_blank">
+                            <img src="{{dict['channel_icon'][1]}}" height="100">
+                        </a>
+                    {% elif info =='video_url' %}
+                        {{dict[info] | safe}}
+                    {% else %}
+                        <div class="text-content">{{dict[info] | safe}}</div>
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
     </table>
     </div>
 </body>
