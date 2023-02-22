@@ -22,8 +22,8 @@
             var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
             var exp = /(\https:\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
             var txt = $(this).text();
-            txt = txt.replace(exp_hash,"<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>")
             txt = txt.replace(exp,"<a href='$1' target='_blank'>$1</a>")
+            txt = txt.replace(exp_hash,"<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>")
             $(this).html(txt);
         });
     });

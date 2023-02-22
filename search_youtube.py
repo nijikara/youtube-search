@@ -13,6 +13,8 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
     print(datetime.datetime.now())
     load_dotenv('.env') 
 
+    if published_from == '':
+        published_from = '2005-04-01'
     if published_to == '':
         published_to = str(datetime.date.today())
 
@@ -37,7 +39,6 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
 
     #-------↑パラメータ入力↑-------
 
-    dt_now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     nextPageToken = ''
     buzz_lists_count = []
     outputs = []
@@ -92,8 +93,8 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
                 #指定した再生回数以上 and 登録者数以下の場合のみCSVに吐く-----------------------------------------
                 
                 for buzz_list in buzz_lists:
-                    print(viewcount_level)
-                    print(buzz_list['viewCount'])
+                    # print(viewcount_level)
+                    # print(buzz_list['viewCount'])
 
                     if( int(buzz_list['viewCount']) >= viewcount_level and int(buzz_list['subscriberCount']) >= subscribercount_level ):
 
@@ -135,9 +136,9 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
                         #ループ数管理用
                         buzz_lists_count.append(buzz_list)
 
-            print("owari")
+            print("roop")
             #条件に合致する動画が必要数集まるまでループ-----------------------------------------
-            print(len(buzz_lists_count))
+            # print(len(buzz_lists_count))
             if( len(buzz_lists_count) >= video_count ):
                 print('条件に合致する動画が必要数集まる')
                 return outputs
@@ -155,7 +156,6 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
         except urllib.error.URLError as err:
             print(err)
             break
-        return outputs
 
 # 動画情報取得
 def get_video(url,buzz_lists,video_list,api_key):
@@ -172,14 +172,30 @@ def get_video(url,buzz_lists,video_list,api_key):
 
             #出力用データに追記
             v = 0
+            # print("item")
+            # print(videos_body['items'])
+            # print("statistics")
+            # print(videos_body['statistics'])
+            # print("likeCount")
+            # print(videos_body['statistics']['likeCount'])
+
             for item in videos_body['items']:
                 buzz_lists[v]['title'] = item['snippet']['title'] #タイトル
                 buzz_lists[v]['description'] = item['snippet']['description'] #概要
                 buzz_lists[v]['viewCount'] = item['statistics']['viewCount'] #再生数
                 buzz_lists[v]['publishedAt'] = item['snippet']['publishedAt'] #投稿日時
                 buzz_lists[v]['thumbnails'] = item['snippet']['thumbnails']['high']['url'] #サムネイル
-                buzz_lists[v]['likeCount'] = item['statistics']['likeCount'] #高評価数
-                buzz_lists[v]['commentCount'] = item['statistics']['commentCount'] #コメント数
+                # buzz_lists[v]['likeCount'] = int(item['statistics']['likeCount'] or 0) #高評価数
+                # なぜか高評価数がない場合がある
+                if 'likeCount' in item['statistics'] :
+                    buzz_lists[v]['likeCount'] = item['statistics']['likeCount'] #高評価数
+                else:
+                    buzz_lists[v]['likeCount'] = 0
+                # なぜかコメント数がない場合がある
+                if 'commentCount' in item['statistics'] :
+                    buzz_lists[v]['commentCount'] = item['statistics']['commentCount'] #コメント数
+                else:
+                    buzz_lists[v]['commentCount'] = 0
                 buzz_lists[v]['video_id'] = item['id'] #id
                 v += 1
 
@@ -200,6 +216,7 @@ def get_channel(url,param,buzz_lists,channels_list,api_key):
         'key':api_key
     }
     target_url = url + 'channels?'+(urllib.parse.urlencode(param))
+    print(target_url)
     req = urllib.request.Request(target_url)
 
     try:
