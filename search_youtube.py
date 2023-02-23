@@ -126,6 +126,7 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
                             'viewCount':buzz_list['viewCount'], 
                             'likeCount':buzz_list['likeCount'], 
                             'commentCount':buzz_list['commentCount'], 
+                            'videoDuration':buzz_list['videoDuration'], 
                             'thumbnails':buzz_list['thumbnails'], 
                             'video_url':video_url, 
                             'name':buzz_list['name'], 
@@ -160,11 +161,12 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
 # 動画情報取得
 def get_video(url,buzz_lists,video_list,api_key):
     param = {
-        'part':'snippet,statistics',
+        'part':'snippet,statistics,contentDetails',
         'id':",".join(video_list),
         'key':api_key
     }
     target_url = url + 'videos?'+(urllib.parse.urlencode(param))
+    print(target_url)
     req = urllib.request.Request(target_url)
     try:
         with urllib.request.urlopen(req) as res:
@@ -196,6 +198,8 @@ def get_video(url,buzz_lists,video_list,api_key):
                     buzz_lists[v]['commentCount'] = item['statistics']['commentCount'] #コメント数
                 else:
                     buzz_lists[v]['commentCount'] = 0
+                print(common.parse_duration(item['contentDetails']['duration']))
+                buzz_lists[v]['videoDuration'] = common.get_time(common.parse_duration(item['contentDetails']['duration'])) #動画時間
                 buzz_lists[v]['video_id'] = item['id'] #id
                 v += 1
 

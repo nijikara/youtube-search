@@ -20,7 +20,7 @@ def get():
     subscribercount_level = int(request.args.get("subscribercount-level","") or 0)
     video_count = int(request.args.get("video-count","") or 0)
     sorce = search_youtube.search_youtube(word,from_date,to_date,viewcount_level,subscribercount_level,video_count)
-    print(len(sorce))
+    # print(len(sorce))
     print(datetime.datetime.now())
     if request.method == 'GET': # GETされたとき
         print('出力')
