@@ -2,7 +2,7 @@ from flask import Flask, render_template
 from flask import request
 import datetime
 import search_youtube
-from flask import Markup
+# from flask import Markup
 
 app = Flask(__name__, static_folder='./templates/images')
 
@@ -19,13 +19,17 @@ def get():
     viewcount_level = int(request.args.get("viewcount-level","") or 0)
     subscribercount_level = int(request.args.get("subscribercount-level","") or 0)
     video_count = int(request.args.get("video-count","") or 0)
-    sorce = search_youtube.search_youtube(word,from_date,to_date,viewcount_level,subscribercount_level,video_count)
-    # print(len(sorce))
+    is_get_comment = request.args.get("comments","")
+    sorce = search_youtube.search_youtube(word,from_date,to_date,viewcount_level,subscribercount_level,video_count,is_get_comment)
+    # print(sorce)
     print(datetime.datetime.now())
+    if sorce == None:
+        return render_template('layout.html', title='search_youtube')
+
     if request.method == 'GET': # GETされたとき
         print('出力')
         # sorce = Markup(sorce)
-        return render_template('template.html',sorce = sorce)
+        return render_template('template.html',sorce = sorce,is_get_comment = is_get_comment)
         
     elif request.method == 'POST': # POSTされたとき
         return 'POST'

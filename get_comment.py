@@ -57,7 +57,8 @@ def print_video_reply(no, cno, video_id, next_page_token, id,api_key):
 
   if next_page_token is not None:
     params['pageToken'] = next_page_token
-  response = requests.get(URL + 'comments', params=params)
+  url = os.environ.get("URL")
+  response = requests.get(url + 'comments', params=params)
   resource = response.json()
 
   for comment_info in resource['items']:
@@ -75,5 +76,6 @@ def print_video_reply(no, cno, video_id, next_page_token, id,api_key):
 
 def get_comment(api_key,video_id):
     # コメントを全取得する
+    print("ssssss")
     no = 1
     return print_video_comment(no, video_id, None)

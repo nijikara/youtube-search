@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
 <meta charset="utf-8" />
 <title>search_youtube</title>
@@ -10,6 +11,14 @@
 <style>
 #fav-table th {
     background-color:pink;
+}
+.text-content,
+.comment-table {
+    max-height: 100px; /* Adjust the maximum height as needed */
+    overflow-y: auto;
+}
+.table td {
+    max-width: 420px;
 }
 </style>
 <script>
@@ -33,7 +42,11 @@
 <div class="card-body">
     <table id="fav-table" class="table table-bordered">
         <thead><tr><th>投稿日時</th><th>タイトル</th><th sortable>概要</th><th>再生数</th><th>高評価数</th><th>コメント数</th><th>動画時間</th><th>サムネイル</th>
-            <th>URL</th><th>チャンネル名</th><th>登録者数</th><th>チャンネルURL</th></tr></thead>
+            <th>URL</th><th>チャンネル名</th><th>登録者数</th><th>チャンネルURL</th>
+            {% if is_get_comment %}
+            <th>コメント</th>
+            {% endif %}
+            </tr></thead>
             {% for dict in sorce %}
             <tr>
                 {% for info in dict %}
@@ -48,6 +61,21 @@
                         </a>
                     {% elif info =='video_url' %}
                         {{dict[info] | safe}}
+                    {% elif info == 'comment' %}
+                    <div class="comment-table">
+                        <table class="table">
+                            <thead>
+                            </thead>
+                            <tbody>
+                                {% for item in dict[info] %}
+                                    <tr>
+                                        <td>{{ item}}</td>
+                                        <!-- Add more cells if needed -->
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                     {% else %}
                         <div class="text-content">{{dict[info] | safe}}</div>
                     {% endif %}

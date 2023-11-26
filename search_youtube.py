@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 
 #-------↓パラメータ入力↓-------
-def search_youtube(key_word,published_from,published_to,viewcount_level,subscribercount_level,video_count):
+def search_youtube(key_word,published_from,published_to,viewcount_level,subscribercount_level,video_count,is_get_comment):
     # 開始時刻
     print(datetime.datetime.now())
     load_dotenv('.env') 
@@ -67,6 +67,7 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
             param['videoCategoryId'] = videoCategoryId
         #target_url:youtubeからのjson情報
         target_url = url + 'search?'+urllib.parse.urlencode(param)
+        # print(target_url)
         req = urllib.request.Request(target_url)
         try:
             with urllib.request.urlopen(req) as res:
@@ -104,21 +105,10 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
                         else:
                             video_url = 'https://www.youtube.com/watch?v=' + buzz_list['video_id']
 
-                        # コメント取得
-                        # comment = get_comment.get_comment(APIKEY,buzz_list['video_id'])
-                        #CSV出力用
-                        # outputs.append([
-                        #     buzz_list['title'], 
-                        #     buzz_list['description'], 
-                        #     buzz_list['viewCount'], 
-                        #     common.change_time(buzz_list['publishedAt']),
-                        #     buzz_list['thumbnails'], 
-                        #     video_url, 
-                        #     buzz_list['name'], 
-                        #     buzz_list['subscriberCount'], 
-                        #     buzz_list['channel_url']
-                        # # comment 
-                        # ])
+                        if is_get_comment:
+                            # コメント取得
+                            print("comment")
+                            comment = get_comment(api_key,buzz_list['video_id'],nextPageToken)
                         outputs.append({
                             'publishedAt':common.change_time(buzz_list['publishedAt']),
                             'title':buzz_list['title'], 
@@ -131,7 +121,8 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
                             'video_url':video_url, 
                             'name':buzz_list['name'], 
                             'subscriberCount':buzz_list['subscriberCount'], 
-                            'channel_icon':[buzz_list['channel_url'],buzz_list['channel_icon']]
+                            'channel_icon':[buzz_list['channel_url'],buzz_list['channel_icon']],
+                            'comment':comment
                         # comment 
                         })
                         #ループ数管理用
@@ -152,6 +143,7 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
                 return outputs
 
         except urllib.error.HTTPError as err:
+            print("HTTPError")
             print(err)
             break
         except urllib.error.URLError as err:
@@ -166,7 +158,7 @@ def get_video(url,buzz_lists,video_list,api_key):
         'key':api_key
     }
     target_url = url + 'videos?'+(urllib.parse.urlencode(param))
-    print(target_url)
+    # print(target_url)
     req = urllib.request.Request(target_url)
     try:
         with urllib.request.urlopen(req) as res:
@@ -174,12 +166,6 @@ def get_video(url,buzz_lists,video_list,api_key):
 
             #出力用データに追記
             v = 0
-            # print("item")
-            # print(videos_body['items'])
-            # print("statistics")
-            # print(videos_body['statistics'])
-            # print("likeCount")
-            # print(videos_body['statistics']['likeCount'])
 
             for item in videos_body['items']:
                 buzz_lists[v]['title'] = item['snippet']['title'] #タイトル
@@ -198,7 +184,7 @@ def get_video(url,buzz_lists,video_list,api_key):
                     buzz_lists[v]['commentCount'] = item['statistics']['commentCount'] #コメント数
                 else:
                     buzz_lists[v]['commentCount'] = 0
-                print(common.parse_duration(item['contentDetails']['duration']))
+                # print(common.parse_duration(item['contentDetails']['duration']))
                 buzz_lists[v]['videoDuration'] = common.get_time(common.parse_duration(item['contentDetails']['duration'])) #動画時間
                 buzz_lists[v]['video_id'] = item['id'] #id
                 v += 1
@@ -220,7 +206,7 @@ def get_channel(url,param,buzz_lists,channels_list,api_key):
         'key':api_key
     }
     target_url = url + 'channels?'+(urllib.parse.urlencode(param))
-    print(target_url)
+    # print(target_url)
     req = urllib.request.Request(target_url)
 
     try:
@@ -244,3 +230,80 @@ def get_channel(url,param,buzz_lists,channels_list,api_key):
         print(err)
         return False
     return True
+
+def print_video_comment(no, video_id, next_page_token):
+      
+  load_dotenv('.env') 
+
+  url = os.environ.get("URL")
+  api_key = os.environ.get("API_KEY")
+  params = {
+    'key': api_key,
+    'part': 'snippet',
+    'videoId': video_id,
+    'order': 'relevance',
+    'textFormat': 'plaintext',
+    'maxResults': 100,
+  }
+  if next_page_token is not None:
+    params['pageToken'] = next_page_token
+  response = requests.get(url + 'commentThreads', params=params)
+  resource = response.json()
+  comments = []
+
+  for comment_info in resource['items']:
+    # コメント
+    text = comment_info['snippet']['topLevelComment']['snippet']['textDisplay']
+    # # グッド数
+    # like_cnt = comment_info['snippet']['topLevelComment']['snippet']['likeCount']
+    # # 返信数
+    # reply_cnt = comment_info['snippet']['totalReplyCount']
+    # # ユーザー名
+    # user_name = comment_info['snippet']['topLevelComment']['snippet']['authorDisplayName']
+    # # Id
+    # parentId = comment_info['snippet']['topLevelComment']['id']
+    comments.append(text.replace('\r', '\n').replace('\n', ' '))
+    # comments.append(text)
+    # if reply_cnt > 0:
+    #   cno = 1
+    #   print_video_reply(no, cno, video_id, None, parentId)
+    no = no + 1
+
+  if 'nextPageToken' in resource:
+    print_video_comment(no, video_id, resource["nextPageToken"])
+  return comments
+
+def print_video_reply(no, cno, video_id, next_page_token, id,api_key):
+  params = {
+    'key': api_key,
+    'part': 'snippet',
+    'videoId': video_id,
+    'textFormat': 'plaintext',
+    'maxResults': 50,
+    'parentId': id,
+  }
+
+  if next_page_token is not None:
+    params['pageToken'] = next_page_token
+  url = os.environ.get("URL")
+  response = requests.get(url + 'comments', params=params)
+  resource = response.json()
+
+  for comment_info in resource['items']:
+    # コメント
+    text = comment_info['snippet']['textDisplay']
+    # グッド数
+    like_cnt = comment_info['snippet']['likeCount']
+    # ユーザー名
+    user_name = comment_info['snippet']['authorDisplayName']
+
+    cno = cno + 1
+
+  if 'nextPageToken' in resource:
+    print_video_reply(no, cno, video_id, resource["nextPageToken"], id,api_key)
+
+def get_comment(api_key,video_id,next_page_token):
+    # コメントを全取得する
+    print("get_comment")
+    no = 1
+    return print_video_comment(no, video_id, next_page_token)
