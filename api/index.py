@@ -2,13 +2,14 @@ from flask import Flask, render_template
 from flask import request
 import datetime
 import search_youtube
+
 # from flask import Markup
 
 app = Flask(__name__, static_folder='./templates/images')
 
 @app.route('/')
 def hello():
-    return render_template('./templates/layout.html', title='search_youtube')
+    return render_template('layout.html', title='search_youtube')
 
 # ↓ /scrapingをGETメソッドで受け取った時の処理
 @app.route('/scraping', methods=['GET', 'POST'])
@@ -24,12 +25,12 @@ def get():
     # print(sorce)
     print(datetime.datetime.now())
     if sorce == None:
-        return render_template('./templates/layout.html', title='search_youtube')
+        return render_template('layout.html', title='search_youtube')
 
     if request.method == 'GET': # GETされたとき
         print('出力')
         # sorce = Markup(sorce)
-        return render_template('./templates/template.html',sorce = sorce,is_get_comment = is_get_comment)
+        return render_template('template.html',sorce = sorce,is_get_comment = is_get_comment)
         
     elif request.method == 'POST': # POSTされたとき
         return 'POST'
