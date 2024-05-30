@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 
 #-------↓パラメータ入力↓-------
-def search_youtube(key_word,published_from,published_to,viewcount_level,subscribercount_level,video_count,is_get_comment):
+def search_youtube(channel_id,key_word,published_from,published_to,viewcount_level,subscribercount_level,video_count,is_get_comment):
     # 開始時刻
     print(datetime.datetime.now())
     load_dotenv('.env') 
@@ -27,7 +27,6 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
     # # 検索日時to
     published_to += 'T23:59:59.999Z'
     videoCategoryId = ''
-    channelId = ''
     comment = []
     
     # 再生数下限
@@ -56,7 +55,7 @@ def search_youtube(key_word,published_from,published_to,viewcount_level,subscrib
             'publishedAfter':published_from,
             'publishedBefore':published_to,
             'type':'video',
-            'channelId':channelId,
+            'channelId':channel_id,
             'pageToken':nextPageToken,
             'key':api_key
         }

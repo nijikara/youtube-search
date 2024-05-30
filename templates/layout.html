@@ -31,7 +31,14 @@
 
 <body>
   <div class="member">
+    <form method="GET" action="/comment">
+      <label for="name" class="col-md-2 control-label">動画ID</label>
+      <input type="text" class="form-control col-md-3"  name="video-id" size="40" >
+      <button type="submit">コメント出力</button>
+    </form>
     <form method="GET" action="/scraping">
+      <label for="name" class="col-md-2 control-label">チャンネルID</label>
+      <input type="text" class="form-control col-md-3"  name="channel-id" size="40" >
       <label for="name" class="col-md-2 control-label">検索ワード</label>
       <input type="text" class="form-control col-md-3"  name="word" size="40" >
       <input type="date" class="form-control col-md-2"  name="from" ></input>
@@ -50,7 +57,6 @@
         </div>
       </div>
       <button type="submit">出力</button>
-    </form>
   </div>
 </body>
 

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset="utf-8" />
+<title>search_youtube</title>
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
+<style>
+    #fav-table th {
+        background-color: pink;
+    }
+
+    .text-content,
+    .comment-table {
+        max-height: 100px;
+        /* Adjust the maximum height as needed */
+        overflow-y: auto;
+    }
+
+    .table td {
+        max-width: 820px;
+        /* Set the maximum width for each table cell */
+        white-space: nowrap;
+        /* Prevent text wrapping */
+    }
+
+    .comment-column {
+        width: 50%;
+        /* Set the width for the comment column */
+    }
+
+    /* Add more styles to adjust column widths as needed */
+</style>
+<script>
+    $(document).ready(function() {
+        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        $('body').html($('body').html().replace(exp,"<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>"));
+
+        $('#fav-table').tablesorter();
+        $('.text-content').each(function(){
+            var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
+            var exp = /(\https:\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            var txt = $(this).text();
+            txt = txt.replace(exp,"<a href='$1' target='_blank'>$1</a>")
+            txt = txt.replace(exp_hash,"<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>")
+            $(this).html(txt);
+        });
+    });
+</script>
+</head>
+<body>
+<div class="card-body">
+    <table id="fav-table" class="table table-bordered">
+        <thead>
+            <tr>
+                <th>投稿日時</th>
+                <th>コメント</th>
+                <th>Like数</th>
+                <th>リプライ数</th>
+                <th>ユーザーID</th>
+                <th>コメントID</th>
+            </tr>
+        </thead>
+        {% for dict in sorce %}
+        <tr>
+            <!-- {% for info in dict %} -->
+            <td>
+                <div class="text-content">{{dict[info] | safe}}</div>
+            </td>
+            <!-- {% endfor %} -->
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</body>
+</html>
