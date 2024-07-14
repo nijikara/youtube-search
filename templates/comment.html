@@ -23,8 +23,9 @@
     .table td {
         max-width: 820px;
         /* Set the maximum width for each table cell */
-        white-space: nowrap;
-        /* Prevent text wrapping */
+        white-space: normal;
+        /* Allow text wrapping */
+        word-wrap: break-word;
     }
 
     .comment-column {
@@ -74,6 +75,6 @@
         </tr>
         {% endfor %}
     </table>
-    </div>
+</div>
 </body>
 </html>

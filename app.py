@@ -3,6 +3,7 @@ from flask import request
 import datetime
 import get_comment_by_id
 import search_youtube
+import common
 # from flask import Markup
 
 app = Flask(__name__, static_folder='./templates/images')
@@ -39,7 +40,8 @@ def get():
 # ↓ /commentをGETメソッドで受け取った時の処理
 @app.route('/comment', methods=['GET', 'POST'])
 def get_comment():
-    video_id = request.args.get("video-id","").replace("https://youtu.be/","")  # リクエストからvideo-idを取得
+    video_id = common.get_video_id(request.args.get("video-id",""))
+    # リクエストからvideo-idを取得
 
     print(video_id)
     sorce = get_comment_by_id.get_comment_by_id(video_id,'') 

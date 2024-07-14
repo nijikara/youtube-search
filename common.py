@@ -1,5 +1,7 @@
 import datetime, pytz, time
 import isodate
+import re
+
 def change_time(created_at):
     st = time.strptime(str(created_at), '%Y-%m-%dT%H:%M:%S%z')        # time.struct_timeに変換
     utc_time = datetime.datetime(st.tm_year, st.tm_mon,st.tm_mday, \
@@ -35,3 +37,16 @@ def get_time(td):
 def parse_duration(duration):
     td = isodate.parse_duration(duration)
     return  td.total_seconds()
+
+
+def get_video_id(url):
+    # 動画IDを抜き出す正規表現パターン
+    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)|.*[?&]v=)|youtu\.be/)([^"&?/ ]{11})'
+    # re.searchを使って一致を検索
+    match = re.search(pattern, url)
+
+    # 一致が見つかった場合、動画IDを抽出
+    if match:
+        return match.group(1)
+    else:
+        return None
