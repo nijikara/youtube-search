@@ -41,7 +41,7 @@ def parse_duration(duration):
 
 def get_video_id(url):
     # 動画IDを抜き出す正規表現パターン
-    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)|.*[?&]v=)|youtu\.be/)([^"&?/ ]{11})'
+    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)|.*[?&]v=|shorts/)|youtu\.be/)([^"&?/ ]{11})'
     # re.searchを使って一致を検索
     match = re.search(pattern, url)
 
