@@ -42,7 +42,7 @@ async def get_comment():
     video_id = common.get_video_id(request.args.get("video-id", ""))
     
     # 非同期関数を呼び出すためにawaitを使用
-    sorce = await get_comment_by_id.get_comment_by_id(video_id, '')
+    sorce = await get_comment_by_id.get_comment_by_id(video_id)
     
     print(datetime.datetime.now())
     if sorce is None:
