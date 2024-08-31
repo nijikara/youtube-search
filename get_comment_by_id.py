@@ -3,12 +3,14 @@ import asyncio
 import os
 from dotenv import load_dotenv
 import common
+import datetime
 
 async def fetch(session, url, params):
     async with session.get(url, params=params) as response:
         return await response.json()
 
 async def get_comment_by_id(video_id):
+    print(datetime.datetime.now())
     load_dotenv('.env')
     url = os.environ.get("URL") + 'commentThreads'
     api_key = os.environ.get("API_KEY")
@@ -37,6 +39,8 @@ async def get_comment_by_id(video_id):
                 like_cnt = comment_info['snippet']['topLevelComment']['snippet']['likeCount']
                 reply_cnt = comment_info['snippet']['totalReplyCount']
                 user_name = comment_info['snippet']['topLevelComment']['snippet']['authorDisplayName']
+                user_img = comment_info['snippet']['topLevelComment']['snippet']['authorProfileImageUrl']
+                user_url = comment_info['snippet']['topLevelComment']['snippet']['authorChannelUrl']
                 parentId = comment_info['snippet']['topLevelComment']['id']
                 comments.append({
                     'no': str(no),
@@ -45,7 +49,9 @@ async def get_comment_by_id(video_id):
                     'like_cnt': like_cnt,
                     'reply_cnt': reply_cnt,
                     'user_name': user_name,
-                    'parentId': parentId + '-0',
+                    'user_img': user_img,
+                    'user_url': user_url,
+                    'parentId': parentId,
                 })
 
                 if reply_cnt > 0:
@@ -81,6 +87,8 @@ async def print_video_reply(no, cno, video_id, next_page_token, parentId, api_ke
             text = comment_info['snippet']['textDisplay']
             like_cnt = comment_info['snippet']['likeCount']
             user_name = comment_info['snippet']['authorDisplayName']
+            user_img = comment_info['snippet']['authorProfileImageUrl']
+            user_url = comment_info['snippet']['authorChannelUrl']
 
             cno += 1
             comments.append({
@@ -90,6 +98,8 @@ async def print_video_reply(no, cno, video_id, next_page_token, parentId, api_ke
                 'like_cnt': like_cnt,
                 'reply_cnt': 0,
                 'user_name': user_name,
+                'user_img': user_img,
+                'user_url': user_url,
                 'parentId': parentId,
             })
 
