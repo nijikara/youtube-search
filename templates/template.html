@@ -23,18 +23,22 @@
 </style>
 <script>
     $(document).ready(function() {
-        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-        $('body').html($('body').html().replace(exp,"<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>"));
-
-        $('#fav-table').tablesorter();
-        $('.text-content').each(function(){
+        // body全体ではなく、特定の要素だけを対象にする
+        $('.text-content').each(function() {
+            // YouTubeのリンクを置換する正規表現
+            var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            // ハッシュタグの置換用正規表現
             var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
-            var exp = /(\https:\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-            var txt = $(this).text();
-            txt = txt.replace(exp,"<a href='$1' target='_blank'>$1</a>")
-            txt = txt.replace(exp_hash,"<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>")
+
+            var txt = $(this).html();  // .text()から.html()に変更して、既存のリンクを保持
+            txt = txt.replace(exp, "<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>");
+            txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>");
+            
             $(this).html(txt);
         });
+
+        // テーブルソートの初期化
+        $('#fav-table').tablesorter();
     });
 </script>
 </head>
@@ -60,8 +64,10 @@
                         <a href="{{dict['channel_icon'][0]}}" target="_blank">
                             <img src="{{dict['channel_icon'][1]}}" height="100">
                         </a>
+                    {% elif info == 'commentCount' %}
+                        <a href="/comment?video-id={{ dict['video_url'] }}" target="_blank">{{ dict['commentCount'] }}</a>
                     {% elif info =='video_url' %}
-                        {{dict[info] | safe}}
+                    <div class="text-content">{{dict[info] | safe}}</div>
                     {% elif info == 'comment' %}
                     <div class="comment-table">
                         <table class="table">
