@@ -72,9 +72,3 @@ def print_video_reply(no, cno, video_id, next_page_token, id,api_key):
 
   if 'nextPageToken' in resource:
     print_video_reply(no, cno, video_id, resource["nextPageToken"], id,api_key)
-
-def get_comment(api_key,video_id):
-    # コメントを全取得する
-    print("ssssss")
-    no = 1
-    return print_video_comment(no, video_id, None)

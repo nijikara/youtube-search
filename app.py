@@ -11,7 +11,7 @@ async def hello():
     return await render_template('layout.html', title='search_youtube')
 
 # /scrapingをGETメソッドで受け取った時の処理
-@app.route('/scraping', methods=['GET', 'POST'])
+@app.route('/scraping', methods=['GET'])
 async def get():
     channel_id = request.args.get("channel-id", "")
     word = request.args.get("word", "")
@@ -32,12 +32,9 @@ async def get():
     if request.method == 'GET': # GETされたとき
         print('出力')
         return await render_template('template.html', sorce=sorce, is_get_comment=is_get_comment)
-        
-    elif request.method == 'POST': # POSTされたとき
-        return 'POST'
 
 # /commentをGETメソッドで受け取った時の処理
-@app.route('/comment', methods=['GET', 'POST'])
+@app.route('/comment', methods=['GET'])
 async def get_comment():
     video_id = common.get_video_id(request.args.get("video-id", ""))
     
@@ -51,9 +48,6 @@ async def get_comment():
     if request.method == 'GET': # GETされたとき
         print('出力')
         return await render_template('comment.html', sorce=sorce)
-        
-    elif request.method == 'POST': # POSTされたとき
-        return 'POST'
 
 if __name__ == "__main__":
     app.run(debug=True)

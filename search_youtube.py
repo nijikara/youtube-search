@@ -11,15 +11,14 @@ import requests
 import get_comment
 from googleapiclient.discovery import build
 
+load_dotenv('.env') 
 url = os.environ.get("URL")
 api_key = os.environ.get("API_KEY")
 async def search_youtube(channel_id, key_word, published_from, published_to, viewcount_level, subscribercount_level, video_count, is_get_comment):
     # 開始時刻
     print(datetime.datetime.now())
-    load_dotenv('.env') 
-    print(1)
-    channel_id = get_youtube_channel_id(channel_id)
-    print(channel_id)
+    if channel_id != '':
+        channel_id = get_youtube_channel_id(channel_id)
 
     if published_from == '':
         published_from = '2005-04-01'
