@@ -1,3 +1,4 @@
+import re
 import aiohttp
 import asyncio
 import json
@@ -8,19 +9,23 @@ from dotenv import load_dotenv
 import urllib.parse
 import requests
 import get_comment
+from googleapiclient.discovery import build
 
+url = os.environ.get("URL")
+api_key = os.environ.get("API_KEY")
 async def search_youtube(channel_id, key_word, published_from, published_to, viewcount_level, subscribercount_level, video_count, is_get_comment):
     # 開始時刻
     print(datetime.datetime.now())
     load_dotenv('.env') 
+    print(1)
+    channel_id = get_youtube_channel_id(channel_id)
+    print(channel_id)
 
     if published_from == '':
         published_from = '2005-04-01'
     if published_to == '':
         published_to = str(datetime.date.today())
 
-    url = os.environ.get("URL")
-    api_key = os.environ.get("API_KEY")
     
     regionCode = 'JP'
     published_from += 'T00:00:00.000Z'
@@ -191,3 +196,42 @@ async def check_redirect(session, shorts_url, watch_url):
             return shorts_url
         else:
             return watch_url
+
+def is_valid_url(url):
+    # URLの形式を検証
+    try:
+        result = urllib.parse.urlparse(url)
+        return all([result.scheme, result.netloc])
+    except:
+        return False
+    
+def get_youtube_channel_id(url):
+    if not is_valid_url(url):
+        raise url
+
+    # YouTube チャンネルの URL 形式に対応
+    patterns = [
+        r'^https:\/\/www\.youtube\.com\/channel\/([A-Za-z0-9_-]+)$',
+        r'^https:\/\/www\.youtube\.com\/c\/([A-Za-z0-9_-]+)$',
+        r'^https:\/\/www\.youtube\.com\/user\/([A-Za-z0-9_-]+)$',
+        r'^https:\/\/www\.youtube\.com\/@([A-Za-z0-9_-]+)$'
+    ]
+
+    for pattern in patterns:
+        match = re.match(pattern, url)
+        if match:
+            youtube = build('youtube', 'v3', developerKey=api_key)
+            print(url)
+            response = youtube.search().list(
+                part='snippet',
+                type="channel", # 検索対象をチャンネルのみに限定
+                q=url, # 検索クエリ
+                maxResults=1
+            ).execute()
+            print('response')
+            print(response['items'][0]['id']['channelId'])
+            for res in response['items']:
+                print(res)
+            
+            return response['items'][0]['id']['channelId']
+    raise url
