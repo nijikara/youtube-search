@@ -65,6 +65,12 @@
         <div class="ml-3">検索結果: {{ sorce | length }}件</div>
       {% endif %}
     </div>
+    
+    {% if sorce and sorce[0].get('mode') == 'rss' %}
+      <div class="alert alert-warning">
+        YouTube Data API の日次クォータ超過のため、チャンネルRSS(Atom)からの簡易結果です（再生数などは0表示/最新分のみ）。
+      </div>
+    {% endif %}
 
     <!-- 検索パネル：初回は開く、検索後は閉じる -->
     <div class="collapse {% if not has_results %}show{% endif %}" id="searchPanel">
