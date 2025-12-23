@@ -1,53 +1,62 @@
-from quart import Quart, render_template, request
-import datetime
-import get_comment_by_id
+from quart import Quart, request, render_template
 import search_youtube
-import common
 
-app = Quart(__name__, static_folder='./templates/images')
+app = Quart(__name__)
 
-@app.route('/')
-async def hello():
-    return await render_template('layout.html', title='search_youtube')
+@app.get("/")
+async def home():
+    form = {
+        "video_id": "",
+        "word": "",
+        "from": "",
+        "to": "",
+        "channel_id": "",
+        "order": "date",
+        "viewcount_min": "",
+        "viewcount_max": "",
+        "sub_min": "",
+        "sub_max": "",
+        "video_count": "1000",
+        "comments": "",
+    }
+    return await render_template("index.html", title="search_youtube", sorce=[], is_get_comment=False, form=form)
 
-# /scrapingをGETメソッドで受け取った時の処理
-@app.route('/scraping', methods=['GET'])
-async def get():
-    channel_id = request.args.get("channel-id", "")
+@app.get("/scraping")
+async def scraping():
     word = request.args.get("word", "")
     from_date = request.args.get("from", "")
     to_date = request.args.get("to", "")
-    viewcount_level = int(request.args.get("viewcount-level", "") or 0)
-    subscribercount_level = int(request.args.get("subscribercount-level", "") or 0)
-    video_count = int(request.args.get("video-count", "") or 0)
-    is_get_comment = request.args.get("comments", "")
-    
-    # 非同期関数を呼び出すためにawaitを使用
-    sorce = await search_youtube.search_youtube(channel_id, word, from_date, to_date, viewcount_level, subscribercount_level, video_count, is_get_comment)
-    
-    print(datetime.datetime.now())
-    if sorce is None:
-        return await render_template('layout.html', title='search_youtube')
+    channel_id = request.args.get("channel-id", "")
+    viewcount_min = request.args.get("viewcount-level", "")
+    subscribercount_min = request.args.get("subscribercount-level", "")
+    video_count = request.args.get("video-count", "1000")
+    is_get_comment = (request.args.get("comments", "") == "true")
 
-    if request.method == 'GET': # GETされたとき
-        print('出力')
-        return await render_template('template.html', sorce=sorce, is_get_comment=is_get_comment)
+    # ★追加分
+    order = request.args.get("order", "date")
+    viewcount_max = request.args.get("viewcount-max", "")
+    subscribercount_max = request.args.get("subscribercount-max", "")
 
-# /commentをGETメソッドで受け取った時の処理
-@app.route('/comment', methods=['GET'])
-async def get_comment():
-    video_id = common.get_video_id(request.args.get("video-id", ""))
-    
-    # 非同期関数を呼び出すためにawaitを使用
-    sorce = await get_comment_by_id.get_comment_by_id(video_id)
-    
-    print(datetime.datetime.now())
-    if sorce is None:
-        return await render_template('layout.html', title='search_youtube')
+    sorce = await search_youtube.search_youtube(
+        channel_id, word, from_date, to_date,
+        viewcount_min, subscribercount_min, video_count,
+        is_get_comment,
+        viewcount_max, subscribercount_max, order
+    )
 
-    if request.method == 'GET': # GETされたとき
-        print('出力')
-        return await render_template('comment.html', sorce=sorce)
+    form = {
+        "video_id": request.args.get("video-id", ""),
+        "word": word,
+        "from": from_date,
+        "to": to_date,
+        "channel_id": channel_id,
+        "order": order,
+        "viewcount_min": viewcount_min,
+        "viewcount_max": viewcount_max,
+        "sub_min": subscribercount_min,
+        "sub_max": subscribercount_max,
+        "video_count": video_count,
+        "comments": "true" if is_get_comment else "",
+    }
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    return await render_template("index.html", title="search_youtube", sorce=sorce, is_get_comment=is_get_comment, form=form)

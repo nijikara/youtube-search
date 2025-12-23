@@ -6,54 +6,82 @@ import common
 import os
 from dotenv import load_dotenv
 import urllib.parse
+import inspect
+import get_comment  # ← ImportError回避のためモジュールimport
 from googleapiclient.discovery import build
-
-# get_comment の import（あなたの実装に合わせてどっちかにして）
-# 1) get_comment.py に async def get_comment(...) があるなら ↓
-# from get_comment import get_comment as fetch_comment
-# 2) もし import get_comment しかできない構造なら、上をコメントして ↓ を使って
-import get_comment
 
 load_dotenv(".env")
 
 BASE_URL = (os.environ.get("URL") or "").strip()
 API_KEY = (os.environ.get("API_KEY") or "").strip()
-
-# 末尾スラッシュが無ければ補う（"…/v3" だと困るので）
 if BASE_URL and not BASE_URL.endswith("/"):
     BASE_URL += "/"
 
 
+def to_int(v, default=0) -> int:
+    try:
+        s = str(v).strip()
+        if s == "":
+            return default
+        return int(float(s))
+    except Exception:
+        return default
+
+
+async def call_maybe_async(fn, *args, **kwargs):
+    res = fn(*args, **kwargs)
+    if inspect.isawaitable(res):
+        return await res
+    return res
+
+
+async def safe_fetch_comment(session, api_key: str, video_id: str, page_token: str):
+    # get_comment.py の関数名が違っても落ちないように候補を順に探す
+    for name in ("get_comment", "fetch_comment", "get_comments"):
+        fn = getattr(get_comment, name, None)
+        if fn:
+            return await call_maybe_async(fn, session, api_key, video_id, page_token)
+    return []
+
+
 async def search_youtube(
-    channel_id: str,
-    key_word: str,
-    published_from: str,
-    published_to: str,
-    viewcount_level,
-    subscribercount_level,
+    channel_id,
+    key_word,
+    published_from,
+    published_to,
+    viewcount_min,
+    subscribercount_min,
     video_count,
-    is_get_comment: bool
+    is_get_comment,
+    viewcount_max="",          # ★追加
+    subscribercount_max="",    # ★追加
+    order="date",              # ★追加（date/relevance/viewCount 等）
 ):
-    """YouTube Data API v3 を使って検索して条件フィルタした結果を返す"""
-
     print(datetime.datetime.now())
-
-    # 数値系の入力を安全に
-    viewcount_level = int(viewcount_level) if str(viewcount_level).strip() else 0
-    subscribercount_level = int(subscribercount_level) if str(subscribercount_level).strip() else 0
-    video_count = int(video_count) if str(video_count).strip() else 1000
 
     key_word = (key_word or "").strip()
     channel_id = (channel_id or "").strip()
+
+    viewcount_min = to_int(viewcount_min, 0)
+    subscribercount_min = to_int(subscribercount_min, 0)
+    video_count = to_int(video_count, 1000)
+
+    # 上限は未指定なら「無限大」
+    viewcount_max = to_int(viewcount_max, 10**18)
+    subscribercount_max = to_int(subscribercount_max, 10**18)
+
+    # orderの安全化（変なの来たらdate）
+    allowed_orders = {"date", "relevance", "viewCount", "rating", "title", "videoCount"}
+    if order not in allowed_orders:
+        order = "date"
 
     # channel_id が指定されていれば UC... に解決
     if channel_id:
         channel_id = get_youtube_channel_id(channel_id)
 
-    # 日付デフォルト
-    if not published_from:
+    if published_from == "":
         published_from = "2005-04-01"
-    if not published_to:
+    if published_to == "":
         published_to = str(datetime.date.today())
 
     regionCode = "JP"
@@ -62,7 +90,6 @@ async def search_youtube(
 
     nextPageToken = ""
     outputs = []
-    total_collected = 0
 
     timeout = aiohttp.ClientTimeout(total=30)
 
@@ -70,12 +97,12 @@ async def search_youtube(
         while True:
             buzz_lists = []
 
-            # ★重要：空の値は送らない（'' を送ると0件になりがち）
+            # ★空の値は送らない（0件事故防止）
             param = {
                 "part": "snippet",
                 "regionCode": regionCode,
                 "maxResults": 50,
-                "order": "viewCount",  # ★viewcount → viewCount（大文字）
+                "order": order,  # ★ここが肝：デフォルト date（低再生も出やすい）
                 "publishedAfter": published_after,
                 "publishedBefore": published_before,
                 "type": "video",
@@ -96,14 +123,11 @@ async def search_youtube(
                     return [{"error": f"search API failed {response.status}: {body}"}]
 
                 search_body = await response.json()
-
-                # APIエラー構造が返る場合もある
                 if "error" in search_body:
                     return [{"error": search_body["error"]}]
 
                 items = search_body.get("items", [])
                 if not items:
-                    # 0件のときは原因切り分けしやすいログ
                     print("search returned 0 items. param=", param)
                     print("search_body=", search_body)
                     return outputs
@@ -112,10 +136,8 @@ async def search_youtube(
                 channels_list = [it["snippet"]["channelId"] for it in items if it.get("snippet", {}).get("channelId")]
 
                 if not video_list:
-                    print("video_list is empty. search_body=", search_body)
                     return outputs
 
-                # videos / channels を取得
                 ok1 = await get_video(session, BASE_URL, buzz_lists, video_list, API_KEY)
                 if not ok1:
                     return [{"error": "videos API failed"}]
@@ -124,62 +146,48 @@ async def search_youtube(
                 if not ok2:
                     return [{"error": "channels API failed"}]
 
-                # shorts/wach URL判定（失敗しても watch に倒す）
                 video_urls = await get_video_urls(session, buzz_lists)
 
-                # フィルタして追加
                 valid = []
                 for i, b in enumerate(buzz_lists):
-                    try:
-                        v = int(b.get("viewCount", 0))
-                        s = int(b.get("subscriberCount", 0))
-                    except Exception:
-                        continue
+                    v = to_int(b.get("viewCount", 0), 0)
+                    s = to_int(b.get("subscriberCount", 0), 0)
 
-                    if v < viewcount_level or s < subscribercount_level:
+                    # ★下限＋上限フィルタ（大物排除）
+                    if not (viewcount_min <= v <= viewcount_max):
+                        continue
+                    if not (subscribercount_min <= s <= subscribercount_max):
                         continue
 
                     video_id = b["video_id"]
 
-                    # コメント取得（必要なときだけ）
                     comments = []
                     if is_get_comment:
                         try:
-                            # get_comment.py の中にある実際の関数名に合わせる
-                            comments = await get_comment.get_comment(session, API_KEY, video_id, "")
+                            comments = await safe_fetch_comment(session, API_KEY, video_id, "")
                         except Exception:
                             comments = []
 
                     valid.append({
-                        # 生値（比較・計算用）
-                        "viewCount": int(b.get("viewCount", 0)),
-                        "likeCount": int(b.get("likeCount", 0)),
-                        "commentCount": int(b.get("commentCount", 0)),
-                        "subscriberCount": int(b.get("subscriberCount", 0)),
-                    
-                        # 表示用（カンマ区切り）
-                        "viewCountText": fmt_count(b.get("viewCount", 0)),
-                        "likeCountText": fmt_count(b.get("likeCount", 0)),
-                        "commentCountText": fmt_count(b.get("commentCount", 0)),
-                        "subscriberCountText": fmt_count(b.get("subscriberCount", 0)),
-                    
                         "publishedAt": common.change_time(b["publishedAt"]),
                         "title": b["title"],
-                        "description": b["description"],
+                        "description": b.get("description", ""),
+                        "viewCount": v,
+                        "likeCount": to_int(b.get("likeCount", 0), 0),
+                        "commentCount": to_int(b.get("commentCount", 0), 0),
                         "videoDuration": b["videoDuration"],
                         "thumbnails": b["thumbnails"],
                         "video_url": video_urls[i] if i < len(video_urls) else f"https://www.youtube.com/watch?v={video_id}",
                         "name": b.get("name", "Unknown"),
+                        "subscriberCount": s,
                         "channel_icon": [b.get("channel_url", ""), b.get("channel_icon", "")],
                         "comment": comments,
                     })
 
-
                 outputs.extend(valid)
-                total_collected = len(outputs)
-                print("出力結果" + str(total_collected) + "件")
+                print("出力結果" + str(len(outputs)) + "件")
 
-                if total_collected >= video_count:
+                if len(outputs) >= video_count:
                     return outputs[:video_count]
 
                 nextPageToken = search_body.get("nextPageToken", "")
@@ -203,7 +211,6 @@ async def get_video(session, base_url, buzz_lists, video_list, api_key):
         videos_body = await response.json()
         items = videos_body.get("items", [])
         if not items:
-            print("videos API returned 0 items", videos_body)
             return False
 
         for item in items:
@@ -224,7 +231,6 @@ async def get_video(session, base_url, buzz_lists, video_list, api_key):
 
 
 async def get_channel(session, base_url, buzz_lists, channels_list, api_key):
-    # 重複除去（API節約）
     unique_channels = list(dict.fromkeys(channels_list))
     if not unique_channels:
         return True
@@ -250,7 +256,6 @@ async def get_channel(session, base_url, buzz_lists, channels_list, api_key):
             info = channel_map.get(cid)
             if not info:
                 continue
-
             b["name"] = info["snippet"]["title"]
             b["subscriberCount"] = info.get("statistics", {}).get("subscriberCount", 0)
             b["channel_url"] = "https://www.youtube.com/channel/" + info["id"]
@@ -272,7 +277,6 @@ async def get_video_urls(session, buzz_lists):
 async def check_redirect(session, shorts_url, watch_url):
     try:
         async with session.get(shorts_url, allow_redirects=True) as response:
-            # historyが空なら shorts が存在している（shorts URLを返す）
             if len(response.history) == 0:
                 return shorts_url
             return watch_url
@@ -282,30 +286,25 @@ async def check_redirect(session, shorts_url, watch_url):
 
 def is_valid_url(u: str) -> bool:
     try:
-        result = urllib.parse.urlparse(u)
-        return bool(result.scheme and result.netloc)
+        r = urllib.parse.urlparse(u)
+        return bool(r.scheme and r.netloc)
     except Exception:
         return False
 
 
 def get_youtube_channel_id(s: str) -> str:
-    """URL / @handle / UC... / 文字列 を channelId(UC...) に解決する"""
     s = (s or "").strip()
     if not s:
         return ""
 
-    # すでに channelId (UC...) を渡された場合
     if re.fullmatch(r"UC[0-9A-Za-z_-]{20,}", s):
         return s
 
     handle = None
     query = None
 
-    # @handle 単体
     if s.startswith("@"):
         handle = s
-
-    # URL
     elif is_valid_url(s):
         p = urllib.parse.urlparse(s)
         path = (p.path or "").rstrip("/")
@@ -317,18 +316,14 @@ def get_youtube_channel_id(s: str) -> str:
             m = re.match(r"^/channel/(UC[0-9A-Za-z_-]+)$", path)
             if m:
                 return m.group(1)
-
-            # /c/ や /user/ は最後の手段として search に投げる
             last = path.split("/")[-1] if path else ""
             query = last or s
-
-    # plain text
     else:
         query = s
 
     youtube = build("youtube", "v3", developerKey=API_KEY, cache_discovery=False)
 
-    # ★公式の forHandle が使えるならそれを優先
+    # forHandle優先（@handle）
     if handle:
         resp = youtube.channels().list(part="id", forHandle=handle).execute()
         items = resp.get("items", [])
@@ -336,17 +331,10 @@ def get_youtube_channel_id(s: str) -> str:
             return items[0]["id"]
         raise ValueError(f"Handle not found: {handle}")
 
-    # fallback: search でチャンネル検索
+    # fallback search
     resp = youtube.search().list(part="snippet", type="channel", q=query, maxResults=1).execute()
     items = resp.get("items", [])
     if items:
         return items[0]["id"]["channelId"]
 
     raise ValueError(f"Channel not found: {s}")
-
-def fmt_count(v) -> str:
-    """数値っぽいものを '12,345' 形式にする。失敗したら '0'."""
-    try:
-        return f"{int(v):,}"
-    except Exception:
-        return "0"

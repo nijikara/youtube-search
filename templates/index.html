@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>{{ title or "search_youtube" }}</title>
+
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+        crossorigin="anonymous">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
+
+  <!-- bootstrap collapse用 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+
+  <style>
+    #fav-table th { background-color: pink; }
+    .text-content, .comment-table { max-height: 100px; overflow-y: auto; }
+    .table td { max-width: 420px; }
+
+    .form-row-gap > * { margin-right: 8px; margin-bottom: 8px; }
+  </style>
+
+  <script>
+    $(document).ready(function() {
+      // YouTubeリンク置換＆ハッシュタグ置換（結果があるときだけでもOKだけど、全体に掛けても問題なし）
+      $('.text-content').each(function() {
+        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
+
+        var txt = $(this).html();
+        txt = txt.replace(exp, "<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>");
+        txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>");
+        $(this).html(txt);
+      });
+
+      $('#fav-table').tablesorter();
+    });
+  </script>
+</head>
+
+<body>
+  <div class="container-fluid my-3">
+
+    {% set has_results = (sorce is defined and sorce|length > 0) %}
+    {% set has_error = (has_results and 'error' in sorce[0]) %}
+
+    <div class="d-flex align-items-center mb-2">
+      <h4 class="mb-0 mr-3">YouTube Search</h4>
+
+      <!-- 検索後は畳む。ボタンで開閉できる -->
+      <button class="btn btn-sm btn-outline-secondary"
+              type="button"
+              data-toggle="collapse"
+              data-target="#searchPanel"
+              aria-expanded="{{ 'false' if has_results else 'true' }}"
+              aria-controls="searchPanel">
+        検索条件を表示/非表示
+      </button>
+
+      {% if has_results and not has_error %}
+        <div class="ml-3">検索結果: {{ sorce | length }}件</div>
+      {% endif %}
+    </div>
+
+    <!-- 検索パネル：初回は開く、検索後は閉じる -->
+    <div class="collapse {% if not has_results %}show{% endif %}" id="searchPanel">
+      <div class="card card-body mb-3">
+
+        <div class="row">
+          <div class="col-md-6">
+            <form method="GET" action="/comment" class="form-row-gap">
+              <label class="col-md-3 control-label">動画URL</label>
+              <input type="text" class="form-control col-md-7" name="video-id" value="{{ form.video_id or '' }}" placeholder="https://www.youtube.com/watch?v=...">
+              <button type="submit" class="btn btn-primary col-md-2">コメント出力</button>
+            </form>
+          </div>
+        </div>
+
+        <hr>
+
+        <form method="GET" action="/scraping">
+          <div class="form-row-gap d-flex flex-wrap align-items-end">
+
+            <div>
+              <label>検索ワード</label>
+              <input type="text" class="form-control" name="word" value="{{ form.word or '' }}" style="min-width:260px;">
+            </div>
+
+            <div>
+              <label>from</label>
+              <input type="date" class="form-control" name="from" value="{{ form.from or '' }}">
+            </div>
+
+            <div>
+              <label>to</label>
+              <input type="date" class="form-control" name="to" value="{{ form.to or '' }}">
+            </div>
+
+            <div>
+              <label>チャンネルID/URL/@handle</label>
+              <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id or '' }}" style="min-width:300px;">
+            </div>
+
+            <div>
+              <label>並び順</label>
+              <select name="order" class="form-control">
+                <option value="date" {% if (form.order or 'date') == 'date' %}selected{% endif %}>新しい順（低再生拾いやすい）</option>
+                <option value="relevance" {% if form.order == 'relevance' %}selected{% endif %}>関連度順</option>
+                <option value="viewCount" {% if form.order == 'viewCount' %}selected{% endif %}>再生数順（大物混ざりやすい）</option>
+              </select>
+            </div>
+
+            <div>
+              <label>再生数 下限</label>
+              <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min or '' }}">
+            </div>
+
+            <div>
+              <label>再生数 上限</label>
+              <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max or '' }}" placeholder="空=無制限">
+            </div>
+
+            <div>
+              <label>登録者数 下限</label>
+              <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min or '' }}">
+            </div>
+
+            <div>
+              <label>登録者数 上限</label>
+              <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max or '' }}" placeholder="空=無制限">
+            </div>
+
+            <div>
+              <label>取得件数</label>
+              <input type="number" class="form-control" name="video-count" value="{{ form.video_count or '1000' }}">
+            </div>
+
+            <div class="form-check" style="margin-bottom: 8px;">
+              <input class="form-check-input" type="checkbox" id="comment-checkbox" name="comments" value="true"
+                     {% if form.comments == 'true' %}checked{% endif %}>
+              <label class="form-check-label" for="comment-checkbox">コメント有り</label>
+            </div>
+
+            <div>
+              <button type="submit" class="btn btn-success">出力</button>
+            </div>
+
+          </div>
+        </form>
+
+      </div>
+    </div>
+
+    {% if has_results %}
+      {% if has_error %}
+        <div class="alert alert-danger">
+          {{ sorce[0]['error'] }}
+        </div>
+      {% else %}
+
+        {% set cols = [
+          'publishedAt','title','description','viewCount','likeCount','commentCount',
+          'videoDuration','thumbnails','video_url','name','subscriberCount','channel_icon'
+        ] %}
+
+        <table id="fav-table" class="table table-bordered">
+          <thead>
+            <tr>
+              <th>投稿日時</th>
+              <th>タイトル</th>
+              <th>概要</th>
+              <th>再生数</th>
+              <th>高評価数</th>
+              <th>コメント数</th>
+              <th>動画時間</th>
+              <th>サムネイル</th>
+              <th>URL</th>
+              <th>チャンネル名</th>
+              <th>登録者数</th>
+              <th>チャンネルURL</th>
+              {% if is_get_comment %}
+                <th>コメント</th>
+              {% endif %}
+            </tr>
+          </thead>
+
+          <tbody>
+          {% for row in sorce %}
+            <tr>
+              {% for key in cols %}
+                <td>
+                  {% if key == 'thumbnails' %}
+                    <a href="{{ row[key] }}" target="_blank">
+                      <img src="{{ row[key] }}" height="100">
+                    </a>
+
+                  {% elif key == 'channel_icon' %}
+                    <a href="{{ row['channel_icon'][0] }}" target="_blank">
+                      <img src="{{ row['channel_icon'][1] }}" height="100">
+                    </a>
+
+                  {% elif key == 'commentCount' %}
+                    <a href="/comment?video-id={{ row['video_url'] }}" target="_blank">
+                      {{ "{:,}".format(row['commentCount']|int) }}
+                    </a>
+
+                  {% elif key in ['viewCount', 'likeCount', 'subscriberCount'] %}
+                    <div class="text-content">{{ "{:,}".format(row[key]|int) }}</div>
+
+                  {% elif key == 'video_url' %}
+                    <div class="text-content">{{ row[key] | safe }}</div>
+
+                  {% else %}
+                    <div class="text-content">{{ row[key] | safe }}</div>
+                  {% endif %}
+                </td>
+              {% endfor %}
+
+              {% if is_get_comment %}
+                <td>
+                  <div class="comment-table">
+                    <table class="table">
+                      <tbody>
+                        {% for item in row['comment'] %}
+                          <tr><td>{{ item }}</td></tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+
+      {% endif %}
+    {% endif %}
+
+  </div>
+</body>
+</html>
