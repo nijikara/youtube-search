@@ -11,25 +11,26 @@
 
   <style>
     #comment-table th { background-color: pink; }
-    .table td { max-width: 900px; }
+    .table td { max-width: 1100px; vertical-align: top; }
 
+    /* 本文の改行は残す */
     .comment-cell { white-space: pre-wrap; }
-    .reply { padding-left: 18px; }
-    .reply::before { content: ">> "; color: #007bff; font-weight: bold; }
+
+    /* 返信の “>>” は付けるが、インデントはしない */
+    .reply-badge { color: #007bff; font-weight: bold; margin-right: 6px; }
 
     .icn img { border-radius: 6px; }
 
-    /* 画像みたいに広いコメント列 */
     .col-comment { width: 60%; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
 
   <script>
     $(document).ready(function() {
       $("#comment-table").tablesorter({
-        // コメント本文/アイコンはソート不要
         headers: {
-          2: { sorter: false },
-          6: { sorter: false }
+          2: { sorter: false }, // コメント本文は基本ソート不要ならOFF
+          6: { sorter: false }  // icn
         }
       });
     });
@@ -40,8 +41,10 @@
   <div class="container-fluid my-3">
     <div class="d-flex align-items-center">
       <a class="btn btn-sm btn-outline-secondary mr-2" href="/">検索へ</a>
-      <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
-      <div class="ml-3">Video ID: {{ video_id }}</div>
+      {% if watch_url %}
+        <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
+      {% endif %}
+      <div class="ml-3 mono">Video ID: {{ video_id }}</div>
     </div>
 
     {% if error %}
@@ -64,16 +67,12 @@
       <tbody>
       {% for r in rows %}
         <tr>
-          <!-- No：1 / 1-1 みたいに -->
           <td data-sort-value="{{ r.sortNo }}">{{ r.no }}</td>
+          <td class="mono" data-sort-value="{{ r.publishedAtIso }}">{{ r.publishedAt }}</td>
 
-          <!-- 投稿日時：表示はJST、ソートはISO -->
-          <td data-sort-value="{{ r.publishedAtIso }}">{{ r.publishedAt }}</td>
-
-          <!-- コメント：返信は >> 付き -->
           <td>
-            <div class="comment-cell {% if r.isReply %}reply{% endif %}">
-              {{ r.text }}
+            <div class="comment-cell">
+              {% if r.isReply %}<span class="reply-badge">&gt;&gt;</span>{% endif %}{{- r.text -}}
             </div>
           </td>
 

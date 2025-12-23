@@ -18,9 +18,10 @@ if BASE_URL and not BASE_URL.endswith("/"):
 
 JST = timezone(timedelta(hours=9))
 
-# --------- 検索キャッシュ ---------
+# --------- 検索キャッシュ（任意）---------
 CACHE = {}
-CACHE_TTL_SEC = 600
+CACHE_TTL_SEC = 600  # 10分
+
 
 def cache_get(key):
     v = CACHE.get(key)
@@ -32,30 +33,36 @@ def cache_get(key):
         return None
     return data
 
+
 def cache_set(key, data):
     CACHE[key] = (time.time(), data)
 
-# --------- video-id抽出（URLでもIDでもOK） ---------
+
+# --------- video-id抽出（URLでもIDでもOK）---------
 def extract_video_id(s: str) -> str | None:
     s = (s or "").strip()
     if re.fullmatch(r"[0-9A-Za-z_-]{11}", s):
         return s
+
     try:
         p = urllib.parse.urlparse(s)
         host = (p.netloc or "").lower()
         path = (p.path or "").strip("/")
 
+        # youtu.be/<id>
         if "youtu.be" in host and path:
             cand = path.split("/")[0]
             if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
                 return cand
 
+        # watch?v=<id>
         qs = urllib.parse.parse_qs(p.query or "")
         if "v" in qs and qs["v"]:
             cand = qs["v"][0]
             if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
                 return cand
 
+        # /shorts/<id>, /embed/<id>, /video/<id>
         parts = path.split("/")
         for i, token in enumerate(parts):
             if token in ("shorts", "embed", "video") and i + 1 < len(parts):
@@ -68,6 +75,7 @@ def extract_video_id(s: str) -> str | None:
     m = re.search(r"([0-9A-Za-z_-]{11})", s)
     return m.group(1) if m else None
 
+
 def iso_to_jst_str(iso: str) -> str:
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(JST)
@@ -75,7 +83,12 @@ def iso_to_jst_str(iso: str) -> str:
     except Exception:
         return iso or ""
 
+
 def extract_user_id(author_channel_url: str, author_name: str) -> str:
+    """
+    可能なら /@handle を拾って @xxxx 表示に寄せる。
+    無理なら表示名。
+    """
     try:
         if author_channel_url:
             u = urllib.parse.urlparse(author_channel_url)
@@ -86,6 +99,18 @@ def extract_user_id(author_channel_url: str, author_name: str) -> str:
     except Exception:
         pass
     return author_name or ""
+
+
+def trim_outer_blank_lines(s: str) -> str:
+    """
+    コメント内部の改行は保持。
+    先頭/末尾の「空行（空白だけの行）」だけ削除。
+    """
+    s = (s or "").replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"^\s*\n+", "", s)   # 先頭の空行群
+    s = re.sub(r"\n+\s*$", "", s)   # 末尾の空行群
+    return s
+
 
 async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict):
     url = BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
@@ -98,7 +123,11 @@ async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dic
         except Exception:
             return None, f"{endpoint} invalid json: {txt}"
 
+
 async def fetch_replies(session: aiohttp.ClientSession, parent_comment_id: str, max_rows: int = 500):
+    """
+    comments.list(parentId=...) で返信を全部（上限max_rows）取る
+    """
     replies = []
     page_token = ""
     while True:
@@ -114,7 +143,7 @@ async def fetch_replies(session: aiohttp.ClientSession, parent_comment_id: str, 
 
         body, err = await yt_get_json(session, "comments", params)
         if err:
-            return replies
+            return replies  # 返信だけ失敗してもトップは出したいので握りつぶす
 
         for it in body.get("items", []):
             sn = it.get("snippet", {}) or {}
@@ -123,7 +152,7 @@ async def fetch_replies(session: aiohttp.ClientSession, parent_comment_id: str, 
             replies.append({
                 "publishedAtIso": sn.get("publishedAt", "") or "",
                 "publishedAt": iso_to_jst_str(sn.get("publishedAt", "") or ""),
-                "text": sn.get("textOriginal") or sn.get("textDisplay") or "",
+                "text": trim_outer_blank_lines(sn.get("textOriginal") or sn.get("textDisplay") or ""),
                 "likeCount": sn.get("likeCount", 0) or 0,
                 "replyCount": 0,
                 "userId": extract_user_id(author_url, author_name),
@@ -138,7 +167,12 @@ async def fetch_replies(session: aiohttp.ClientSession, parent_comment_id: str, 
         if not page_token:
             return replies
 
+
 async def fetch_comment_table(video_id: str, page_token: str = "", max_threads: int = 20):
+    """
+    手本の表形式（No, 投稿日時, コメント, Like数, リプライ数, ユーザーID, icn）に合う行リストを作る
+    返信は 1-1, 1-2 ... の形で連結する
+    """
     rows = []
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -158,10 +192,11 @@ async def fetch_comment_table(video_id: str, page_token: str = "", max_threads: 
             return None, None, err
 
         next_token = body.get("nextPageToken", "") or ""
-        thread_no = 0
 
+        thread_no = 0
         for th in body.get("items", []):
             thread_no += 1
+
             th_sn = th.get("snippet", {}) or {}
             total_reply = th_sn.get("totalReplyCount", 0) or 0
 
@@ -172,13 +207,14 @@ async def fetch_comment_table(video_id: str, page_token: str = "", max_threads: 
             author_url = top_sn.get("authorChannelUrl", "") or ""
             author_name = top_sn.get("authorDisplayName", "") or ""
 
+            # 1行目（トップコメント）
             rows.append({
                 "sortNo": thread_no * 1000,
                 "no": str(thread_no),
                 "isReply": False,
                 "publishedAtIso": top_sn.get("publishedAt", "") or "",
                 "publishedAt": iso_to_jst_str(top_sn.get("publishedAt", "") or ""),
-                "text": top_sn.get("textOriginal") or top_sn.get("textDisplay") or "",
+                "text": trim_outer_blank_lines(top_sn.get("textOriginal") or top_sn.get("textDisplay") or ""),
                 "likeCount": top_sn.get("likeCount", 0) or 0,
                 "replyCount": total_reply,
                 "userId": extract_user_id(author_url, author_name),
@@ -188,8 +224,9 @@ async def fetch_comment_table(video_id: str, page_token: str = "", max_threads: 
                 "commentUrl": f"https://www.youtube.com/watch?v={video_id}&lc={top_id}" if top_id else f"https://www.youtube.com/watch?v={video_id}",
             })
 
+            # 返信（1-1, 1-2...）
             if total_reply > 0 and top_id:
-                replies = await fetch_replies(session, top_id)
+                replies = await fetch_replies(session, top_id, max_rows=500)
                 for i, r in enumerate(replies, start=1):
                     r["sortNo"] = thread_no * 1000 + i
                     r["no"] = f"{thread_no}-{i}"
@@ -233,8 +270,12 @@ async def scraping():
     viewcount_max = request.args.get("viewcount-max", "")
     subscribercount_max = request.args.get("subscribercount-max", "")
 
-    cache_key = (word, from_date, to_date, channel_id, viewcount_min, viewcount_max,
-                 subscribercount_min, subscribercount_max, video_count, order)
+    cache_key = (
+        word, from_date, to_date, channel_id,
+        viewcount_min, viewcount_max,
+        subscribercount_min, subscribercount_max,
+        video_count, order
+    )
 
     sorce = cache_get(cache_key)
     if sorce is None:
@@ -257,6 +298,7 @@ async def scraping():
         "sub_max": subscribercount_max,
         "video_count": video_count,
     }
+
     return await render_template("index.html", title="search_youtube", sorce=sorce, is_get_comment=False, form=form)
 
 
