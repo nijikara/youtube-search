@@ -1,7 +1,6 @@
 import os
 import re
 import urllib.parse
-from datetime import datetime
 import aiohttp
 
 from quart import Quart, request, render_template, Response
@@ -17,12 +16,9 @@ API_KEY = (os.environ.get("API_KEY") or "").strip()
 if YT_BASE_URL and not YT_BASE_URL.endswith("/"):
     YT_BASE_URL += "/"
 
-# ---------------------------
-# Common helpers
-# ---------------------------
+
 def extract_video_id(s: str) -> str | None:
     s = (s or "").strip()
-
     if re.fullmatch(r"[0-9A-Za-z_-]{11}", s):
         return s
 
@@ -56,7 +52,6 @@ def extract_video_id(s: str) -> str | None:
 
 
 async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict, quota_method: str):
-    # クォータ推定カウント
     search_youtube.quota.add(quota_method)
 
     url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
@@ -67,7 +62,6 @@ async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dic
         except Exception:
             js = None
 
-        # quotaExceeded判定（最低限）
         if resp.status == 403 and (text and "quotaExceeded" in text):
             raise search_youtube.QuotaExceededError(f"{endpoint} failed 403: {text}")
 
@@ -98,9 +92,6 @@ def default_form():
     }
 
 
-# ---------------------------
-# Routes
-# ---------------------------
 @app.get("/", strict_slashes=False)
 async def home():
     return await render_template(
@@ -172,7 +163,6 @@ async def comment():
     parent_id = (request.args.get("parent-id", "") or "").strip()
     page_token = (request.args.get("pageToken", "") or "").strip()
 
-    # 1) 動画情報（タイトル＆サムネ）
     timeout = aiohttp.ClientTimeout(total=30)
     video_title = ""
     video_thumb = ""
@@ -190,10 +180,8 @@ async def comment():
                 channel_title = sn.get("channelTitle", "") or ""
                 video_thumb = (((sn.get("thumbnails") or {}).get("high") or {}).get("url")) or ""
         except Exception:
-            # ここが落ちてもコメントページは出す
             pass
 
-    # 2) コメント取得
     rows = []
     next_token = ""
 
@@ -233,7 +221,6 @@ async def comment():
                             "commentId": it.get("id", "") or "",
                         }
                     )
-
             else:
                 params = {
                     "part": "snippet",
