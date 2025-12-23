@@ -2,141 +2,135 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>search_youtube</title>
+  <title>{{ title }}</title>
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
         integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
         crossorigin="anonymous">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
 
-  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
 
   <style>
-    #fav-table th {
-      background-color: pink;
-    }
-    .text-content,
-    .comment-table {
-      max-height: 100px;
-      overflow-y: auto;
-    }
-    .table td {
-      max-width: 420px;
-    }
+    #cmt-table th { background-color: #cfe8ff; }
+    .comment-cell { white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
+    .meta { color:#777; }
+    .icon { border-radius: 999px; }
   </style>
 
   <script>
     $(document).ready(function() {
-      $('.text-content').each(function() {
-        // YouTubeリンク置換
-        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-        // ハッシュタグ置換
-        var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
-
-        var txt = $(this).html();
-        txt = txt.replace(exp, "<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>");
-        txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>");
-
-        $(this).html(txt);
-      });
-
-      $('#fav-table').tablesorter();
+      $('#cmt-table').tablesorter();
     });
   </script>
 </head>
 
 <body>
-  <div class="card-body">
-    <div>検索結果: {{ sorce | length }}件</div>
+<div class="container-fluid mt-3">
 
-    {# 表示カラム順を固定（ここが列ズレ防止の核） #}
-    {% set cols = [
-      'publishedAt',
-      'title',
-      'description',
-      'viewCount',
-      'likeCount',
-      'commentCount',
-      'videoDuration',
-      'thumbnails',
-      'video_url',
-      'name',
-      'subscriberCount',
-      'channel_icon'
-    ] %}
-
-    <table id="fav-table" class="table table-bordered">
-      <thead>
-        <tr>
-          <th>投稿日時</th>
-          <th>タイトル</th>
-          <th>概要</th>
-          <th>再生数</th>
-          <th>高評価数</th>
-          <th>コメント数</th>
-          <th>動画時間</th>
-          <th>サムネイル</th>
-          <th>URL</th>
-          <th>チャンネル名</th>
-          <th>登録者数</th>
-          <th>チャンネルURL</th>
-          {% if is_get_comment %}
-            <th>コメント</th>
-          {% endif %}
-        </tr>
-      </thead>
-
-      <tbody>
-      {% for row in sorce %}
-        <tr>
-          {% for key in cols %}
-            <td>
-              {% if key == 'thumbnails' %}
-                <a href="{{ row[key] }}" target="_blank">
-                  <img src="{{ row[key] }}" height="100">
-                </a>
-
-              {% elif key == 'channel_icon' %}
-                <a href="{{ row['channel_icon'][0] }}" target="_blank">
-                  <img src="{{ row['channel_icon'][1] }}" height="100">
-                </a>
-
-              {% elif key == 'commentCount' %}
-                <a href="/comment?video-id={{ row['video_url'] }}" target="_blank">
-                  {{ "{:,}".format(row['commentCount']|int) }}
-                </a>
-
-              {% elif key in ['viewCount', 'likeCount', 'subscriberCount'] %}
-                <div class="text-content">{{ "{:,}".format(row[key]|int) }}</div>
-
-              {% elif key == 'video_url' %}
-                <div class="text-content">{{ row[key] | safe }}</div>
-
-              {% else %}
-                <div class="text-content">{{ row[key] | safe }}</div>
-              {% endif %}
-            </td>
-          {% endfor %}
-
-          {% if is_get_comment %}
-            <td>
-              <div class="comment-table">
-                <table class="table">
-                  <tbody>
-                    {% for item in row['comment'] %}
-                      <tr><td>{{ item }}</td></tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </td>
-          {% endif %}
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="small meta">
+      Quota(推定): {{ quota.used_est }} / {{ quota.limit }}（残り {{ quota.remaining_est }}） / 次回リセット: {{ quota.next_reset_jst }}
+    </div>
+    <div>
+      <a class="btn btn-sm btn-outline-secondary" href="/">検索へ戻る</a>
+      <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">YouTubeで開く</a>
+    </div>
   </div>
+
+  <div class="card mb-3">
+    <div class="card-body d-flex">
+      {% if video_thumb %}
+        <img src="{{ video_thumb }}" height="90" class="mr-3">
+      {% endif %}
+      <div>
+        <div class="h5 mb-1">{{ video_title if video_title else watch_url }}</div>
+        <div class="meta">{{ channel_title }}</div>
+        <div class="meta">
+          {% if mode == "replies" %}
+            返信一覧（parent-id: {{ parent_id }}）
+          {% else %}
+            トップコメント一覧
+          {% endif %}
+        </div>
+        {% if mode == "replies" %}
+          <div class="mt-2">
+            <a class="btn btn-sm btn-outline-secondary" href="/comment?video-id={{ video_id }}">トップコメントへ</a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <div class="mb-2">
+    {% if next_page_token %}
+      {% if mode == "replies" %}
+        <a class="btn btn-sm btn-outline-success"
+           href="/comment?video-id={{ video_id }}&mode=replies&parent-id={{ parent_id }}&pageToken={{ next_page_token }}">次の100件</a>
+      {% else %}
+        <a class="btn btn-sm btn-outline-success"
+           href="/comment?video-id={{ video_id }}&pageToken={{ next_page_token }}">次の100件</a>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <table id="cmt-table" class="table table-bordered table-sm">
+    <thead>
+      <tr>
+        <th>No</th>
+        <th>投稿日時</th>
+        <th>コメント</th>
+        <th>Like数</th>
+        <th>リプライ数</th>
+        <th>ユーザー</th>
+        <th>icon</th>
+        {% if mode != "replies" %}
+          <th>返信へ</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.no }}</td>
+        <td>{{ r.publishedAt }}</td>
+        <td><div class="comment-cell">{{- r.text -}}</div></td>
+        <td>{{ "{:,}".format(r.likeCount|int) }}</td>
+        <td>{{ "{:,}".format(r.replyCount|int) }}</td>
+        <td>
+          {% if r.authorChannelUrl %}
+            <a href="{{ r.authorChannelUrl }}" target="_blank">{{ r.author }}</a>
+          {% else %}
+            {{ r.author }}
+          {% endif %}
+        </td>
+        <td>
+          {% if r.iconUrl %}
+            <img class="icon" src="{{ r.iconUrl }}" height="36">
+          {% endif %}
+        </td>
+
+        {% if mode != "replies" %}
+          <td>
+            {% if (r.replyCount|int) > 0 %}
+              <a href="/comment?video-id={{ video_id }}&mode=replies&parent-id={{ r.commentId }}" target="_blank">
+                返信を見る
+              </a>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+</div>
 </body>
 </html>

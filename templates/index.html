@@ -1,252 +1,321 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>{{ title or "search_youtube" }}</title>
+import os
+import re
+import urllib.parse
+from datetime import datetime
+import aiohttp
 
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
-        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
-        crossorigin="anonymous">
+from quart import Quart, request, render_template, Response
 
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
+import search_youtube
 
-  <!-- bootstrap collapse用 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+app = Quart(__name__)
+app.jinja_env.trim_blocks = True
+app.jinja_env.lstrip_blocks = True
 
-  <style>
-    #fav-table th { background-color: pink; }
-    .text-content, .comment-table { max-height: 100px; overflow-y: auto; }
-    .table td { max-width: 420px; }
+YT_BASE_URL = (os.environ.get("URL") or "https://www.googleapis.com/youtube/v3/").strip()
+API_KEY = (os.environ.get("API_KEY") or "").strip()
+if YT_BASE_URL and not YT_BASE_URL.endswith("/"):
+    YT_BASE_URL += "/"
 
-    .form-row-gap > * { margin-right: 8px; margin-bottom: 8px; }
-  </style>
+# ---------------------------
+# Common helpers
+# ---------------------------
+def extract_video_id(s: str) -> str | None:
+    s = (s or "").strip()
 
-  <script>
-    $(document).ready(function() {
-      // YouTubeリンク置換＆ハッシュタグ置換（結果があるときだけでもOKだけど、全体に掛けても問題なし）
-      $('.text-content').each(function() {
-        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-        var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
+    if re.fullmatch(r"[0-9A-Za-z_-]{11}", s):
+        return s
 
-        var txt = $(this).html();
-        txt = txt.replace(exp, "<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>");
-        txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>");
-        $(this).html(txt);
-      });
+    try:
+        p = urllib.parse.urlparse(s)
+        host = (p.netloc or "").lower()
+        path = (p.path or "").strip("/")
 
-      $('#fav-table').tablesorter();
-    });
-  </script>
-</head>
+        if "youtu.be" in host and path:
+            cand = path.split("/")[0]
+            if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
+                return cand
 
-<body>
-  <div class="container-fluid my-3">
+        qs = urllib.parse.parse_qs(p.query or "")
+        if "v" in qs and qs["v"]:
+            cand = qs["v"][0]
+            if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
+                return cand
 
-    {% set has_results = (sorce is defined and sorce|length > 0) %}
-    {% set has_error = (has_results and 'error' in sorce[0]) %}
+        parts = path.split("/")
+        for i, token in enumerate(parts):
+            if token in ("shorts", "embed", "video") and i + 1 < len(parts):
+                cand = parts[i + 1]
+                if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
+                    return cand
+    except Exception:
+        pass
 
-    <div class="d-flex align-items-center mb-2">
-      <h4 class="mb-0 mr-3">YouTube Search</h4>
+    m = re.search(r"([0-9A-Za-z_-]{11})", s)
+    return m.group(1) if m else None
 
-      <!-- 検索後は畳む。ボタンで開閉できる -->
-      <button class="btn btn-sm btn-outline-secondary"
-              type="button"
-              data-toggle="collapse"
-              data-target="#searchPanel"
-              aria-expanded="{{ 'false' if has_results else 'true' }}"
-              aria-controls="searchPanel">
-        検索条件を表示/非表示
-      </button>
 
-      {% if has_results and not has_error %}
-        <div class="ml-3">検索結果: {{ sorce | length }}件</div>
-      {% endif %}
-    </div>
-    
-    {% if sorce and sorce[0].get('mode') == 'rss' %}
-      <div class="alert alert-warning">
-        YouTube Data API の日次クォータ超過のため、チャンネルRSS(Atom)からの簡易結果です（再生数などは0表示/最新分のみ）。
-      </div>
-    {% endif %}
+async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict, quota_method: str):
+    # クォータ推定カウント
+    search_youtube.quota.add(quota_method)
 
-    <!-- 検索パネル：初回は開く、検索後は閉じる -->
-    <div class="collapse {% if not has_results %}show{% endif %}" id="searchPanel">
-      <div class="card card-body mb-3">
+    url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
+    async with session.get(url) as resp:
+        text = await resp.text()
+        try:
+            js = await resp.json()
+        except Exception:
+            js = None
 
-        <div class="row">
-          <div class="col-md-6">
-            <form method="GET" action="/comment" class="form-row-gap">
-              <label class="col-md-3 control-label">動画URL</label>
-              <input type="text" class="form-control col-md-7" name="video-id" value="{{ form.video_id or '' }}" placeholder="https://www.youtube.com/watch?v=...">
-              <button type="submit" class="btn btn-primary col-md-2">コメント出力</button>
-            </form>
-          </div>
-        </div>
+        # quotaExceeded判定（最低限）
+        if resp.status == 403 and (text and "quotaExceeded" in text):
+            raise search_youtube.QuotaExceededError(f"{endpoint} failed 403: {text}")
 
-        <hr>
+        if resp.status != 200:
+            raise RuntimeError(f"{endpoint} failed {resp.status}: {text}")
 
-        <form method="GET" action="/scraping">
-          <div class="form-row-gap d-flex flex-wrap align-items-end">
+        if js is None:
+            raise RuntimeError(f"{endpoint} invalid json: {text}")
 
-            <div>
-              <label>検索ワード</label>
-              <input type="text" class="form-control" name="word" value="{{ form.word or '' }}" style="min-width:260px;">
-            </div>
+        if "error" in js:
+            raise RuntimeError(str(js["error"]))
 
-            <div>
-              <label>from</label>
-              <input type="date" class="form-control" name="from" value="{{ form.from or '' }}">
-            </div>
+        return js
 
-            <div>
-              <label>to</label>
-              <input type="date" class="form-control" name="to" value="{{ form.to or '' }}">
-            </div>
 
-            <div>
-              <label>チャンネルID/URL/@handle</label>
-              <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id or '' }}" style="min-width:300px;">
-            </div>
+def default_form():
+    return {
+        "word": "",
+        "from": "",
+        "to": "",
+        "channel_id": "",
+        "order": "date",
+        "viewcount_min": "",
+        "viewcount_max": "",
+        "sub_min": "",
+        "sub_max": "",
+        "video_count": "200",
+    }
 
-            <div>
-              <label>並び順</label>
-              <select name="order" class="form-control">
-                <option value="date" {% if (form.order or 'date') == 'date' %}selected{% endif %}>新しい順（低再生拾いやすい）</option>
-                <option value="relevance" {% if form.order == 'relevance' %}selected{% endif %}>関連度順</option>
-                <option value="viewCount" {% if form.order == 'viewCount' %}selected{% endif %}>再生数順（大物混ざりやすい）</option>
-              </select>
-            </div>
 
-            <div>
-              <label>再生数 下限</label>
-              <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min or '' }}">
-            </div>
+# ---------------------------
+# Routes
+# ---------------------------
+@app.get("/", strict_slashes=False)
+async def home():
+    return await render_template(
+        "index.html",
+        title="search_youtube",
+        sorce=[],
+        form=default_form(),
+        quota=search_youtube.quota_snapshot_dict(),
+    )
 
-            <div>
-              <label>再生数 上限</label>
-              <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max or '' }}" placeholder="空=無制限">
-            </div>
 
-            <div>
-              <label>登録者数 下限</label>
-              <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min or '' }}">
-            </div>
+@app.get("/scraping", strict_slashes=False)
+async def scraping():
+    word = request.args.get("word", "")
+    from_date = request.args.get("from", "")
+    to_date = request.args.get("to", "")
+    channel_id = request.args.get("channel-id", "")
 
-            <div>
-              <label>登録者数 上限</label>
-              <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max or '' }}" placeholder="空=無制限">
-            </div>
+    viewcount_min = request.args.get("viewcount-level", "")
+    viewcount_max = request.args.get("viewcount-max", "")
+    sub_min = request.args.get("subscribercount-level", "")
+    sub_max = request.args.get("subscribercount-max", "")
+    video_count = request.args.get("video-count", "200")
+    order = request.args.get("order", "date")
 
-            <div>
-              <label>取得件数</label>
-              <input type="number" class="form-control" name="video-count" value="{{ form.video_count or '1000' }}">
-            </div>
+    sorce = await search_youtube.search_youtube(
+        channel_id_input=channel_id,
+        key_word=word,
+        published_from=from_date,
+        published_to=to_date,
+        viewcount_min=viewcount_min,
+        subscribercount_min=sub_min,
+        video_count=video_count,
+        viewcount_max=viewcount_max,
+        subscribercount_max=sub_max,
+        order=order,
+    )
 
-            <div class="form-check" style="margin-bottom: 8px;">
-              <input class="form-check-input" type="checkbox" id="comment-checkbox" name="comments" value="true"
-                     {% if form.comments == 'true' %}checked{% endif %}>
-              <label class="form-check-label" for="comment-checkbox">コメント有り</label>
-            </div>
+    form = {
+        "word": word,
+        "from": from_date,
+        "to": to_date,
+        "channel_id": channel_id,
+        "order": order,
+        "viewcount_min": viewcount_min,
+        "viewcount_max": viewcount_max,
+        "sub_min": sub_min,
+        "sub_max": sub_max,
+        "video_count": video_count,
+    }
 
-            <div>
-              <button type="submit" class="btn btn-success">出力</button>
-            </div>
+    return await render_template(
+        "index.html",
+        title="search_youtube",
+        sorce=sorce,
+        form=form,
+        quota=search_youtube.quota_snapshot_dict(),
+    )
 
-          </div>
-        </form>
 
-      </div>
-    </div>
+@app.get("/comment", strict_slashes=False)
+async def comment():
+    raw = request.args.get("video-id", "")
+    video_id = extract_video_id(raw)
+    if not video_id:
+        return Response("invalid video-id", status=400)
 
-    {% if has_results %}
-      {% if has_error %}
-        <div class="alert alert-danger">
-          {{ sorce[0]['error'] }}
-        </div>
-      {% else %}
+    mode = (request.args.get("mode", "threads") or "threads").strip()
+    parent_id = (request.args.get("parent-id", "") or "").strip()
+    page_token = (request.args.get("pageToken", "") or "").strip()
 
-        {% set cols = [
-          'publishedAt','title','description','viewCount','likeCount','commentCount',
-          'videoDuration','thumbnails','video_url','name','subscriberCount','channel_icon'
-        ] %}
+    # 1) 動画情報（タイトル＆サムネ）
+    timeout = aiohttp.ClientTimeout(total=30)
+    video_title = ""
+    video_thumb = ""
+    channel_title = ""
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        <table id="fav-table" class="table table-bordered">
-          <thead>
-            <tr>
-              <th>投稿日時</th>
-              <th>タイトル</th>
-              <th>概要</th>
-              <th>再生数</th>
-              <th>高評価数</th>
-              <th>コメント数</th>
-              <th>動画時間</th>
-              <th>サムネイル</th>
-              <th>URL</th>
-              <th>チャンネル名</th>
-              <th>登録者数</th>
-              <th>チャンネルURL</th>
-              {% if is_get_comment %}
-                <th>コメント</th>
-              {% endif %}
-            </tr>
-          </thead>
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        try:
+            params = {"part": "snippet", "id": video_id, "key": API_KEY}
+            body = await yt_get_json(session, "videos", params, "videos.list")
+            items = body.get("items") or []
+            if items:
+                sn = (items[0].get("snippet") or {})
+                video_title = sn.get("title", "") or ""
+                channel_title = sn.get("channelTitle", "") or ""
+                video_thumb = (((sn.get("thumbnails") or {}).get("high") or {}).get("url")) or ""
+        except Exception:
+            # ここが落ちてもコメントページは出す
+            pass
 
-          <tbody>
-          {% for row in sorce %}
-            <tr>
-              {% for key in cols %}
-                <td>
-                  {% if key == 'thumbnails' %}
-                    <a href="{{ row[key] }}" target="_blank">
-                      <img src="{{ row[key] }}" height="100">
-                    </a>
+    # 2) コメント取得
+    rows = []
+    next_token = ""
 
-                  {% elif key == 'channel_icon' %}
-                    <a href="{{ row['channel_icon'][0] }}" target="_blank">
-                      <img src="{{ row['channel_icon'][1] }}" height="100">
-                    </a>
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        try:
+            if mode == "replies":
+                if not parent_id:
+                    return Response("missing parent-id for replies", status=400)
 
-                  {% elif key == 'commentCount' %}
-                    <a href="/comment?video-id={{ row['video_url'] }}" target="_blank">
-                      {{ "{:,}".format(row['commentCount']|int) }}
-                    </a>
+                params = {
+                    "part": "snippet",
+                    "parentId": parent_id,
+                    "maxResults": 100,
+                    "textFormat": "plainText",
+                    "key": API_KEY,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
 
-                  {% elif key in ['viewCount', 'likeCount', 'subscriberCount'] %}
-                    <div class="text-content">{{ "{:,}".format(row[key]|int) }}</div>
+                body = await yt_get_json(session, "comments", params, "comments.list")
+                next_token = (body.get("nextPageToken") or "").strip()
 
-                  {% elif key == 'video_url' %}
-                    <div class="text-content">{{ row[key] | safe }}</div>
+                idx = 0
+                for it in (body.get("items") or []):
+                    idx += 1
+                    sn = (it.get("snippet") or {})
+                    rows.append(
+                        {
+                            "no": str(idx),
+                            "publishedAt": search_youtube._iso_to_jst_str(sn.get("publishedAt", "") or ""),
+                            "text": sn.get("textOriginal") or sn.get("textDisplay") or "",
+                            "likeCount": sn.get("likeCount", 0) or 0,
+                            "replyCount": 0,
+                            "author": sn.get("authorDisplayName", "") or "",
+                            "authorChannelUrl": sn.get("authorChannelUrl", "") or "",
+                            "iconUrl": sn.get("authorProfileImageUrl", "") or "",
+                            "commentId": it.get("id", "") or "",
+                        }
+                    )
 
-                  {% else %}
-                    <div class="text-content">{{ row[key] | safe }}</div>
-                  {% endif %}
-                </td>
-              {% endfor %}
+            else:
+                params = {
+                    "part": "snippet",
+                    "videoId": video_id,
+                    "maxResults": 100,
+                    "order": "relevance",
+                    "textFormat": "plainText",
+                    "key": API_KEY,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
 
-              {% if is_get_comment %}
-                <td>
-                  <div class="comment-table">
-                    <table class="table">
-                      <tbody>
-                        {% for item in row['comment'] %}
-                          <tr><td>{{ item }}</td></tr>
-                        {% endfor %}
-                      </tbody>
-                    </table>
-                  </div>
-                </td>
-              {% endif %}
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
+                body = await yt_get_json(session, "commentThreads", params, "commentThreads.list")
+                next_token = (body.get("nextPageToken") or "").strip()
 
-      {% endif %}
-    {% endif %}
+                idx = 0
+                for th in (body.get("items") or []):
+                    idx += 1
+                    sn = (th.get("snippet") or {})
+                    top = (sn.get("topLevelComment") or {})
+                    top_sn = (top.get("snippet") or {})
+                    total_reply = sn.get("totalReplyCount", 0) or 0
+                    cid = top.get("id", "") or ""
+                    rows.append(
+                        {
+                            "no": str(idx),
+                            "publishedAt": search_youtube._iso_to_jst_str(top_sn.get("publishedAt", "") or ""),
+                            "text": top_sn.get("textOriginal") or top_sn.get("textDisplay") or "",
+                            "likeCount": top_sn.get("likeCount", 0) or 0,
+                            "replyCount": total_reply,
+                            "author": top_sn.get("authorDisplayName", "") or "",
+                            "authorChannelUrl": top_sn.get("authorChannelUrl", "") or "",
+                            "iconUrl": top_sn.get("authorProfileImageUrl", "") or "",
+                            "commentId": cid,
+                        }
+                    )
 
-  </div>
-</body>
-</html>
+        except search_youtube.QuotaExceededError as e:
+            return await render_template(
+                "comment.html",
+                title="Comments",
+                quota=search_youtube.quota_snapshot_dict(),
+                video_id=video_id,
+                watch_url=watch_url,
+                video_title=video_title,
+                video_thumb=video_thumb,
+                channel_title=channel_title,
+                mode=mode,
+                parent_id=parent_id,
+                rows=[],
+                next_page_token="",
+                error=str(e),
+            )
+        except Exception as e:
+            return await render_template(
+                "comment.html",
+                title="Comments",
+                quota=search_youtube.quota_snapshot_dict(),
+                video_id=video_id,
+                watch_url=watch_url,
+                video_title=video_title,
+                video_thumb=video_thumb,
+                channel_title=channel_title,
+                mode=mode,
+                parent_id=parent_id,
+                rows=[],
+                next_page_token="",
+                error=str(e),
+            )
+
+    return await render_template(
+        "comment.html",
+        title="Comments",
+        quota=search_youtube.quota_snapshot_dict(),
+        video_id=video_id,
+        watch_url=watch_url,
+        video_title=video_title,
+        video_thumb=video_thumb,
+        channel_title=channel_title,
+        mode=mode,
+        parent_id=parent_id,
+        rows=rows,
+        next_page_token=next_token,
+        error="",
+    )
