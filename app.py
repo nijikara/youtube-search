@@ -1,8 +1,10 @@
 import os
 import re
+import time
 import urllib.parse
-import aiohttp
+from datetime import datetime, timezone, timedelta
 
+import aiohttp
 from quart import Quart, request, render_template, Response
 
 import search_youtube
@@ -15,6 +17,49 @@ YT_BASE_URL = (os.environ.get("URL") or "https://www.googleapis.com/youtube/v3/"
 API_KEY = (os.environ.get("API_KEY") or "").strip()
 if YT_BASE_URL and not YT_BASE_URL.endswith("/"):
     YT_BASE_URL += "/"
+
+JST = timezone(timedelta(hours=9))
+
+
+# ---------------------------
+# Common helpers
+# ---------------------------
+def _iso_to_jst_str(iso: str) -> str:
+    try:
+        dt = datetime.fromisoformat((iso or "").replace("Z", "+00:00")).astimezone(JST)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return iso or ""
+
+
+def _trim_outer_blank_lines(s: str) -> str:
+    # コメント内の改行は残す／先頭末尾の空行だけ落とす
+    s = (s or "").replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"^\s*\n+", "", s)
+    s = re.sub(r"\n+\s*$", "", s)
+    return s
+
+
+def _user_id_from(author_channel_url: str, author_name: str) -> str:
+    """
+    可能なら @handle を出す。なければ UC...、それも無理なら表示名。
+    """
+    u = (author_channel_url or "").strip()
+    try:
+        if u:
+            p = urllib.parse.urlparse(u)
+            path = urllib.parse.unquote(p.path or "")
+
+            m = re.search(r"/@([^/]+)", path)
+            if m:
+                return "@" + m.group(1)
+
+            m2 = re.search(r"/channel/([^/]+)", path)
+            if m2:
+                return m2.group(1)
+    except Exception:
+        pass
+    return (author_name or "").strip()
 
 
 def extract_video_id(s: str) -> str | None:
@@ -52,7 +97,9 @@ def extract_video_id(s: str) -> str | None:
 
 
 async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict, quota_method: str):
-    search_youtube.quota.add(quota_method)
+    # クォータ推定カウント（search_youtube 側にある前提）
+    if hasattr(search_youtube, "quota") and hasattr(search_youtube.quota, "add"):
+        search_youtube.quota.add(quota_method)
 
     url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
     async with session.get(url) as resp:
@@ -92,6 +139,9 @@ def default_form():
     }
 
 
+# ---------------------------
+# Routes
+# ---------------------------
 @app.get("/", strict_slashes=False)
 async def home():
     return await render_template(
@@ -99,7 +149,7 @@ async def home():
         title="search_youtube",
         sorce=[],
         form=default_form(),
-        quota=search_youtube.quota_snapshot_dict(),
+        quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
     )
 
 
@@ -148,7 +198,7 @@ async def scraping():
         title="search_youtube",
         sorce=sorce,
         form=form,
-        quota=search_youtube.quota_snapshot_dict(),
+        quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
     )
 
 
@@ -159,16 +209,18 @@ async def comment():
     if not video_id:
         return Response("invalid video-id", status=400)
 
-    mode = (request.args.get("mode", "threads") or "threads").strip()
+    mode = (request.args.get("mode", "threads") or "threads").strip()  # threads / replies
     parent_id = (request.args.get("parent-id", "") or "").strip()
     page_token = (request.args.get("pageToken", "") or "").strip()
 
-    timeout = aiohttp.ClientTimeout(total=30)
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # 1) 動画情報（タイトル＆サムネ）
     video_title = ""
     video_thumb = ""
     channel_title = ""
-    watch_url = f"https://www.youtube.com/watch?v={video_id}"
 
+    timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
             params = {"part": "snippet", "id": video_id, "key": API_KEY}
@@ -180,13 +232,15 @@ async def comment():
                 channel_title = sn.get("channelTitle", "") or ""
                 video_thumb = (((sn.get("thumbnails") or {}).get("high") or {}).get("url")) or ""
         except Exception:
+            # ここ落ちてもページ自体は出す
             pass
 
+    # 2) コメント取得（threads or replies）
     rows = []
     next_token = ""
 
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             if mode == "replies":
                 if not parent_id:
                     return Response("missing parent-id for replies", status=400)
@@ -208,17 +262,24 @@ async def comment():
                 for it in (body.get("items") or []):
                     idx += 1
                     sn = (it.get("snippet") or {})
+                    author = sn.get("authorDisplayName", "") or ""
+                    author_url = sn.get("authorChannelUrl", "") or ""
+                    icon = sn.get("authorProfileImageUrl", "") or ""
+                    cid = it.get("id", "") or ""
+                    published_iso = sn.get("publishedAt", "") or ""
                     rows.append(
                         {
                             "no": str(idx),
-                            "publishedAt": search_youtube._iso_to_jst_str(sn.get("publishedAt", "") or ""),
-                            "text": sn.get("textOriginal") or sn.get("textDisplay") or "",
+                            "publishedAtIso": published_iso,
+                            "publishedAt": _iso_to_jst_str(published_iso),
+                            "text": _trim_outer_blank_lines(sn.get("textOriginal") or sn.get("textDisplay") or ""),
                             "likeCount": sn.get("likeCount", 0) or 0,
                             "replyCount": 0,
-                            "author": sn.get("authorDisplayName", "") or "",
-                            "authorChannelUrl": sn.get("authorChannelUrl", "") or "",
-                            "iconUrl": sn.get("authorProfileImageUrl", "") or "",
-                            "commentId": it.get("id", "") or "",
+                            "userId": _user_id_from(author_url, author),
+                            "authorChannelUrl": author_url,
+                            "iconUrl": icon,
+                            "commentId": cid,
+                            "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
                         }
                     )
             else:
@@ -243,59 +304,67 @@ async def comment():
                     top = (sn.get("topLevelComment") or {})
                     top_sn = (top.get("snippet") or {})
                     total_reply = sn.get("totalReplyCount", 0) or 0
+
+                    author = top_sn.get("authorDisplayName", "") or ""
+                    author_url = top_sn.get("authorChannelUrl", "") or ""
+                    icon = top_sn.get("authorProfileImageUrl", "") or ""
                     cid = top.get("id", "") or ""
+                    published_iso = top_sn.get("publishedAt", "") or ""
+
                     rows.append(
                         {
                             "no": str(idx),
-                            "publishedAt": search_youtube._iso_to_jst_str(top_sn.get("publishedAt", "") or ""),
-                            "text": top_sn.get("textOriginal") or top_sn.get("textDisplay") or "",
+                            "publishedAtIso": published_iso,
+                            "publishedAt": _iso_to_jst_str(published_iso),
+                            "text": _trim_outer_blank_lines(top_sn.get("textOriginal") or top_sn.get("textDisplay") or ""),
                             "likeCount": top_sn.get("likeCount", 0) or 0,
                             "replyCount": total_reply,
-                            "author": top_sn.get("authorDisplayName", "") or "",
-                            "authorChannelUrl": top_sn.get("authorChannelUrl", "") or "",
-                            "iconUrl": top_sn.get("authorProfileImageUrl", "") or "",
+                            "userId": _user_id_from(author_url, author),
+                            "authorChannelUrl": author_url,
+                            "iconUrl": icon,
                             "commentId": cid,
+                            "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
+                            "repliesUrl": f"/comment?video-id={video_id}&mode=replies&parent-id={cid}" if cid and total_reply > 0 else "",
                         }
                     )
 
-        except search_youtube.QuotaExceededError as e:
-            return await render_template(
-                "comment.html",
-                title="Comments",
-                quota=search_youtube.quota_snapshot_dict(),
-                video_id=video_id,
-                watch_url=watch_url,
-                video_title=video_title,
-                video_thumb=video_thumb,
-                channel_title=channel_title,
-                mode=mode,
-                parent_id=parent_id,
-                rows=[],
-                next_page_token="",
-                error=str(e),
-            )
-        except Exception as e:
-            return await render_template(
-                "comment.html",
-                title="Comments",
-                quota=search_youtube.quota_snapshot_dict(),
-                video_id=video_id,
-                watch_url=watch_url,
-                video_title=video_title,
-                video_thumb=video_thumb,
-                channel_title=channel_title,
-                mode=mode,
-                parent_id=parent_id,
-                rows=[],
-                next_page_token="",
-                error=str(e),
-            )
+    except search_youtube.QuotaExceededError as e:
+        return await render_template(
+            "comment.html",
+            title="Comments",
+            quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
+            watch_url=watch_url,
+            video_title=video_title,
+            video_thumb=video_thumb,
+            channel_title=channel_title,
+            mode=mode,
+            parent_id=parent_id,
+            rows=[],
+            next_page_token="",
+            error=str(e),
+            video_id=video_id,
+        )
+    except Exception as e:
+        return await render_template(
+            "comment.html",
+            title="Comments",
+            quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
+            watch_url=watch_url,
+            video_title=video_title,
+            video_thumb=video_thumb,
+            channel_title=channel_title,
+            mode=mode,
+            parent_id=parent_id,
+            rows=[],
+            next_page_token="",
+            error=str(e),
+            video_id=video_id,
+        )
 
     return await render_template(
         "comment.html",
         title="Comments",
-        quota=search_youtube.quota_snapshot_dict(),
-        video_id=video_id,
+        quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
         watch_url=watch_url,
         video_title=video_title,
         video_thumb=video_thumb,
@@ -305,4 +374,5 @@ async def comment():
         rows=rows,
         next_page_token=next_token,
         error="",
+        video_id=video_id,
     )
