@@ -2,36 +2,34 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>comments</title>
+  <title>comment table</title>
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
-
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
 
   <style>
-    #comment-table th { background-color: #cfe8ff; }
-    .text-content { max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
-    .table td { max-width: 520px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    #comment-table th { background-color: pink; }
+    .table td { max-width: 900px; }
+
+    .comment-cell { white-space: pre-wrap; }
+    .reply { padding-left: 18px; }
+    .reply::before { content: ">> "; color: #007bff; font-weight: bold; }
+
+    .icn img { border-radius: 6px; }
+
+    /* 画像みたいに広いコメント列 */
+    .col-comment { width: 60%; }
   </style>
 
   <script>
     $(document).ready(function() {
-      // URLを軽くリンク化（必要なら）
-      $('.text-content').each(function() {
-        var exp = /(https:\/\/[^\s]+)/ig;
-        var txt = $(this).html();
-        txt = txt.replace(exp, "<a href='$1' target='_blank' rel='noopener noreferrer'>$1</a>");
-        $(this).html(txt);
-      });
-
       $("#comment-table").tablesorter({
-        // 0=publishedAt, 1=likeCount, 2=replyCount, 3=author, 4=text, 5=link
+        // コメント本文/アイコンはソート不要
         headers: {
-          4: { sorter: false }, // 本文はソート不要ならfalse
-          5: { sorter: false }
+          2: { sorter: false },
+          6: { sorter: false }
         }
       });
     });
@@ -41,53 +39,70 @@
 <body>
   <div class="container-fluid my-3">
     <div class="d-flex align-items-center">
-      <h4 class="mb-0 mr-3">コメント一覧</h4>
-      {% if watch_url %}
-        <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
-      {% endif %}
-      <a class="btn btn-sm btn-outline-secondary ml-2" href="/">検索に戻る</a>
+      <a class="btn btn-sm btn-outline-secondary mr-2" href="/">検索へ</a>
+      <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
+      <div class="ml-3">Video ID: {{ video_id }}</div>
     </div>
 
     {% if error %}
       <div class="alert alert-danger mt-3">{{ error }}</div>
     {% endif %}
 
-    <div class="mt-3">
-      <table id="comment-table" class="table table-bordered tablesorter">
-        <thead>
-          <tr>
-            <th>投稿日</th>
-            <th>👍</th>
-            <th>返信</th>
-            <th>投稿者</th>
-            <th>本文</th>
-            <th>リンク</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for c in comments %}
-            <tr>
-              <td class="mono">{{ c.publishedAt }}</td>
-              <td>{{ c.likeCount }}</td>
-              <td>{{ c.replyCount }}</td>
-              <td>{{ c.author }}</td>
-              <td><div class="text-content">{{ c.text }}</div></td>
-              <td>
-                <a href="{{ c.commentUrl }}" target="_blank" rel="noopener noreferrer">開く</a>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <table id="comment-table" class="table table-bordered mt-3">
+      <thead>
+        <tr>
+          <th>No</th>
+          <th>投稿日時</th>
+          <th class="col-comment">コメント</th>
+          <th>Like数</th>
+          <th>リプライ数</th>
+          <th>ユーザーID</th>
+          <th>icn</th>
+        </tr>
+      </thead>
+
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <!-- No：1 / 1-1 みたいに -->
+          <td data-sort-value="{{ r.sortNo }}">{{ r.no }}</td>
+
+          <!-- 投稿日時：表示はJST、ソートはISO -->
+          <td data-sort-value="{{ r.publishedAtIso }}">{{ r.publishedAt }}</td>
+
+          <!-- コメント：返信は >> 付き -->
+          <td>
+            <div class="comment-cell {% if r.isReply %}reply{% endif %}">
+              {{ r.text }}
+            </div>
+          </td>
+
+          <td>{{ r.likeCount }}</td>
+          <td>{{ r.replyCount }}</td>
+
+          <td>
+            {% if r.authorChannelUrl %}
+              <a href="{{ r.authorChannelUrl }}" target="_blank">{{ r.userId }}</a>
+            {% else %}
+              {{ r.userId }}
+            {% endif %}
+          </td>
+
+          <td class="icn">
+            {% if r.iconUrl %}
+              <img src="{{ r.iconUrl }}" height="40" width="40">
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
 
     {% if next_page_token %}
-      <div class="mt-3">
-        <a class="btn btn-outline-primary"
-           href="/comment?video-id={{ video_id }}&pageToken={{ next_page_token }}">
-          次のページ
-        </a>
-      </div>
+      <a class="btn btn-outline-primary"
+         href="/comment?video-id={{ video_id }}&pageToken={{ next_page_token }}">
+        次のページ（トップコメント）
+      </a>
     {% endif %}
   </div>
 </body>
