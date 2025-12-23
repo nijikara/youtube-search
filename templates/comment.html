@@ -44,6 +44,9 @@
       {% if watch_url %}
         <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
       {% endif %}
+      <a class="btn btn-sm btn-outline-success" href="/comment_export?video-id={{ video_id }}&order=time">
+        全コメントCSV
+      </a>
     </div>
     
     {% if video_meta %}
