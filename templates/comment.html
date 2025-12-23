@@ -86,9 +86,7 @@
           <td class="mono" data-sort-value="{{ r.publishedAtIso }}">{{ r.publishedAt }}</td>
 
           <td>
-            <div class="comment-cell">
-              {% if r.isReply %}<span class="reply-badge">&gt;&gt;</span>{% endif %}{{- r.text -}}
-            </div>
+            <div class="comment-cell">{%- if r.isReply -%}<span class="reply-badge">&gt;&gt;</span>{%- endif -%}{{- r.text -}}</div>
           </td>
 
           <td>{{ r.likeCount }}</td>
