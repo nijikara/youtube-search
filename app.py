@@ -307,16 +307,58 @@ async def comment():
     raw = request.args.get("video-id", "")
     vid = extract_video_id(raw)
     if not vid:
-        return await render_template("comment.html", error="invalid video-id", video_id="", watch_url="", rows=[], next_page_token="")
+        return await render_template(
+            "comment.html",
+            error="invalid video-id",
+            watch_url="",
+            video_meta=None,
+            rows=[],
+            next_page_token=""
+        )
 
     page_token = request.args.get("pageToken", "").strip()
+
+    # コメント表
     rows, next_token, err = await fetch_comment_table(vid, page_token=page_token, max_threads=20)
+
+    # タイトル＆サムネ（コメントとは別に1回だけ）
+    video_meta, meta_err = await fetch_video_meta(vid)
+
+    # エラーが両方あると見づらいので結合
+    merged_err = err
+    if meta_err:
+        merged_err = (str(err) + " / " if err else "") + str(meta_err)
 
     return await render_template(
         "comment.html",
-        error=err,
-        video_id=vid,
+        error=merged_err,
         watch_url=f"https://www.youtube.com/watch?v={vid}",
+        video_meta=video_meta,
         rows=rows or [],
         next_page_token=next_token or "",
     )
+
+
+async def fetch_video_meta(video_id: str):
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        params = {
+            "part": "snippet",
+            "id": video_id,
+            "key": API_KEY,
+        }
+        body, err = await yt_get_json(session, "videos", params)
+        if err:
+            return None, err
+        items = body.get("items", [])
+        if not items:
+            return None, "videos: no items"
+        sn = items[0].get("snippet", {}) or {}
+        thumbs = sn.get("thumbnails", {}) or {}
+        # 優先順位：maxres > high > medium > default
+        thumb = (thumbs.get("maxres") or thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}).get("url", "")
+        return {
+            "title": sn.get("title", ""),
+            "thumbnail": thumb,
+            "channelTitle": sn.get("channelTitle", ""),
+        }, None

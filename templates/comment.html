@@ -44,8 +44,23 @@
       {% if watch_url %}
         <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
       {% endif %}
-      <div class="ml-3 mono">Video ID: {{ video_id }}</div>
     </div>
+    
+    {% if video_meta %}
+      <div class="d-flex align-items-center mt-3">
+        {% if video_meta.thumbnail %}
+          <a href="{{ watch_url }}" target="_blank" class="mr-3">
+            <img src="{{ video_meta.thumbnail }}" height="90" style="border-radius:8px;">
+          </a>
+        {% endif %}
+        <div>
+          <div style="font-weight:700; font-size:18px;">{{ video_meta.title }}</div>
+          {% if video_meta.channelTitle %}
+            <div class="text-muted">{{ video_meta.channelTitle }}</div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
 
     {% if error %}
       <div class="alert alert-danger mt-3">{{ error }}</div>
