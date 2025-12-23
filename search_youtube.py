@@ -10,9 +10,9 @@ from googleapiclient.discovery import build
 
 # get_comment の import（あなたの実装に合わせてどっちかにして）
 # 1) get_comment.py に async def get_comment(...) があるなら ↓
-from get_comment import get_comment as fetch_comment
+# from get_comment import get_comment as fetch_comment
 # 2) もし import get_comment しかできない構造なら、上をコメントして ↓ を使って
-# import get_comment
+import get_comment
 
 load_dotenv(".env")
 
@@ -145,9 +145,8 @@ async def search_youtube(
                     comments = []
                     if is_get_comment:
                         try:
-                            comments = await fetch_comment(session, API_KEY, video_id, "")
-                            # もし import get_comment の形なら↓に変更
-                            # comments = await get_comment.get_comment(session, API_KEY, video_id, "")
+                            # get_comment.py の中にある実際の関数名に合わせる
+                            comments = await get_comment.get_comment(session, API_KEY, video_id, "")
                         except Exception:
                             comments = []
 
