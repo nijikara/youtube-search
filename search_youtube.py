@@ -6,8 +6,6 @@ import common
 import os
 from dotenv import load_dotenv
 import urllib.parse
-import inspect
-import get_comment  # ← ImportError回避のためモジュールimport
 from googleapiclient.discovery import build
 
 load_dotenv(".env")
@@ -28,35 +26,19 @@ def to_int(v, default=0) -> int:
         return default
 
 
-async def call_maybe_async(fn, *args, **kwargs):
-    res = fn(*args, **kwargs)
-    if inspect.isawaitable(res):
-        return await res
-    return res
-
-
-async def safe_fetch_comment(session, api_key: str, video_id: str, page_token: str):
-    # get_comment.py の関数名が違っても落ちないように候補を順に探す
-    for name in ("get_comment", "fetch_comment", "get_comments"):
-        fn = getattr(get_comment, name, None)
-        if fn:
-            return await call_maybe_async(fn, session, api_key, video_id, page_token)
-    return []
-
-
 async def search_youtube(
-    channel_id,
-    key_word,
-    published_from,
-    published_to,
+    channel_id: str,
+    key_word: str,
+    published_from: str,
+    published_to: str,
     viewcount_min,
     subscribercount_min,
     video_count,
-    is_get_comment,
-    viewcount_max="",          # ★追加
-    subscribercount_max="",    # ★追加
-    order="date",              # ★追加（date/relevance/viewCount 等）
+    viewcount_max="",
+    subscribercount_max="",
+    order="date",
 ):
+    # 開始時刻
     print(datetime.datetime.now())
 
     key_word = (key_word or "").strip()
@@ -66,11 +48,10 @@ async def search_youtube(
     subscribercount_min = to_int(subscribercount_min, 0)
     video_count = to_int(video_count, 1000)
 
-    # 上限は未指定なら「無限大」
+    # 上限未指定なら無限大
     viewcount_max = to_int(viewcount_max, 10**18)
     subscribercount_max = to_int(subscribercount_max, 10**18)
 
-    # orderの安全化（変なの来たらdate）
     allowed_orders = {"date", "relevance", "viewCount", "rating", "title", "videoCount"}
     if order not in allowed_orders:
         order = "date"
@@ -79,6 +60,7 @@ async def search_youtube(
     if channel_id:
         channel_id = get_youtube_channel_id(channel_id)
 
+    # 日付デフォルト
     if published_from == "":
         published_from = "2005-04-01"
     if published_to == "":
@@ -97,12 +79,12 @@ async def search_youtube(
         while True:
             buzz_lists = []
 
-            # ★空の値は送らない（0件事故防止）
+            # 空の値は送らない（0件事故防止）
             param = {
                 "part": "snippet",
                 "regionCode": regionCode,
                 "maxResults": 50,
-                "order": order,  # ★ここが肝：デフォルト date（低再生も出やすい）
+                "order": order,
                 "publishedAfter": published_after,
                 "publishedBefore": published_before,
                 "type": "video",
@@ -153,20 +135,13 @@ async def search_youtube(
                     v = to_int(b.get("viewCount", 0), 0)
                     s = to_int(b.get("subscriberCount", 0), 0)
 
-                    # ★下限＋上限フィルタ（大物排除）
+                    # 下限＋上限フィルタ（大物排除）
                     if not (viewcount_min <= v <= viewcount_max):
                         continue
                     if not (subscribercount_min <= s <= subscribercount_max):
                         continue
 
                     video_id = b["video_id"]
-
-                    comments = []
-                    if is_get_comment:
-                        try:
-                            comments = await safe_fetch_comment(session, API_KEY, video_id, "")
-                        except Exception:
-                            comments = []
 
                     valid.append({
                         "publishedAt": common.change_time(b["publishedAt"]),
@@ -178,10 +153,10 @@ async def search_youtube(
                         "videoDuration": b["videoDuration"],
                         "thumbnails": b["thumbnails"],
                         "video_url": video_urls[i] if i < len(video_urls) else f"https://www.youtube.com/watch?v={video_id}",
+                        "video_id": video_id,  # ★クリックでコメント取得用
                         "name": b.get("name", "Unknown"),
                         "subscriberCount": s,
                         "channel_icon": [b.get("channel_url", ""), b.get("channel_icon", "")],
-                        "comment": comments,
                     })
 
                 outputs.extend(valid)
@@ -323,7 +298,6 @@ def get_youtube_channel_id(s: str) -> str:
 
     youtube = build("youtube", "v3", developerKey=API_KEY, cache_discovery=False)
 
-    # forHandle優先（@handle）
     if handle:
         resp = youtube.channels().list(part="id", forHandle=handle).execute()
         items = resp.get("items", [])
@@ -331,7 +305,6 @@ def get_youtube_channel_id(s: str) -> str:
             return items[0]["id"]
         raise ValueError(f"Handle not found: {handle}")
 
-    # fallback search
     resp = youtube.search().list(part="snippet", type="channel", q=query, maxResults=1).execute()
     items = resp.get("items", [])
     if items:
