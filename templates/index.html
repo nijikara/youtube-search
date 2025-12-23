@@ -30,9 +30,9 @@
     .small { font-size: 12px; }
     .nowrap { white-space: nowrap; }
     .sticky-top-2 { position: sticky; top: 0; z-index: 2; background: #fff; padding-top: 8px; }
+    .error-row { background: #fff3cd; }
   </style>
 
-  <!-- quota は JSに直埋めしない（VS CodeのJS診断が壊れるので） -->
   <script id="quota-json" type="application/json">{{ quota | tojson }}</script>
 
   <script>
@@ -43,9 +43,7 @@
     }
 
     function linkifyAndHashtagify($root){
-      // YouTubeリンク（watch/shorts）
       const exp = /(https:\/\/www\.youtube\.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-      // ハッシュタグ
       const exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
 
       $root.find(".js-text").each(function(){
@@ -58,25 +56,25 @@
     }
 
     $(function(){
-      // quota表示
       try{
         const quota = JSON.parse(document.getElementById("quota-json").textContent || "{}");
         $("#quota-used").text(fmt(quota.used ?? quota.used_estimate ?? 0));
         $("#quota-remaining").text(fmt(quota.remaining ?? quota.remaining_estimate ?? ""));
         $("#quota-reset").text(String(quota.reset_at_jst ?? quota.reset ?? ""));
         if (quota.note) $("#quota-note").text(String(quota.note));
-      }catch(e){
-        // 何もしない
-      }
+      }catch(e){}
 
-      // tablesorter
       $("#fav-table").tablesorter({
         theme: "default",
+        textExtraction: function(node){
+          const v = $(node).attr("data-sort-value");
+          return (v !== undefined && v !== null) ? v : $(node).text();
+        },
         headers: {
-          3: { sorter: "digit" },  // 再生数
-          4: { sorter: "digit" },  // 高評価
-          5: { sorter: "digit" },  // コメント数
-          10:{ sorter: "digit" }   // 登録者数
+          3: { sorter: "digit" },
+          4: { sorter: "digit" },
+          5: { sorter: "digit" },
+          10:{ sorter: "digit" }
         }
       });
 
@@ -112,7 +110,6 @@
     </div>
   </div>
 
-  {# 初回は開く、検索後（結果がある時）は畳む #}
   <div id="searchPanel" class="collapse {% if not sorce %}show{% endif %} mt-3">
     <div class="card">
       <div class="card-body">
@@ -229,45 +226,65 @@
 
       <tbody>
       {% for row in sorce %}
-        <tr>
-          {% for key in cols %}
-            {% if key in ['viewCount','likeCount','commentCount','subscriberCount'] %}
-              <td class="nowrap" data-sort-value="{{ row[key] | int }}">
-                {% if key == 'commentCount' %}
-                  <a href="/comment?video-id={{ row['video_url'] }}" target="_blank" rel="noopener noreferrer">
-                    {{ "{:,}".format(row[key] | int) }}
-                  </a>
-                {% else %}
-                  {{ "{:,}".format(row[key] | int) }}
-                {% endif %}
-              </td>
 
-            {% elif key == 'thumbnails' %}
-              <td class="thumb">
-                <a href="{{ row[key] }}" target="_blank" rel="noopener noreferrer">
-                  <img src="{{ row[key] }}" height="90" alt="thumb">
-                </a>
-              </td>
+        {# もしエラー行（{"error": "..."}）が混ざってても落ちないように表示 #}
+        {% if row.get('error') %}
+          <tr class="error-row">
+            <td colspan="12">
+              <strong>ERROR:</strong> {{ row.get('error') }}
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            {% for key in cols %}
 
-            {% elif key == 'channel_icon' %}
-              <td class="thumb">
-                <a href="{{ row['channel_icon'][0] }}" target="_blank" rel="noopener noreferrer">
-                  <img src="{{ row['channel_icon'][1] }}" height="60" alt="channel">
-                </a>
-              </td>
+              {% if key in ['viewCount','likeCount','commentCount','subscriberCount'] %}
+                {% set val = (row.get(key, 0) | int) %}
+                <td class="nowrap" data-sort-value="{{ val }}">
+                  {% if key == 'commentCount' %}
+                    <a href="/comment?video-id={{ row.get('video_url','') }}" target="_blank" rel="noopener noreferrer">
+                      {{ "{:,}".format(val) }}
+                    </a>
+                  {% else %}
+                    {{ "{:,}".format(val) }}
+                  {% endif %}
+                </td>
 
-            {% elif key == 'video_url' %}
-              <td class="nowrap">
-                <div class="js-text text-content">{{- row[key] | e -}}</div>
-              </td>
+              {% elif key == 'thumbnails' %}
+                {% set u = row.get(key, '') %}
+                <td class="thumb">
+                  {% if u %}
+                    <a href="{{ u }}" target="_blank" rel="noopener noreferrer">
+                      <img src="{{ u }}" height="90" alt="thumb">
+                    </a>
+                  {% endif %}
+                </td>
 
-            {% else %}
-              <td>
-                <div class="js-text text-content">{{- (row[key] | default('')) | e -}}</div>
-              </td>
-            {% endif %}
-          {% endfor %}
-        </tr>
+              {% elif key == 'channel_icon' %}
+                {% set ci = row.get('channel_icon', []) %}
+                <td class="thumb">
+                  {% if ci and ci|length >= 2 %}
+                    <a href="{{ ci[0] }}" target="_blank" rel="noopener noreferrer">
+                      <img src="{{ ci[1] }}" height="60" alt="channel">
+                    </a>
+                  {% endif %}
+                </td>
+
+              {% elif key == 'video_url' %}
+                <td class="nowrap">
+                  <div class="js-text text-content">{{- (row.get(key,'') ) | e -}}</div>
+                </td>
+
+              {% else %}
+                <td>
+                  <div class="js-text text-content">{{- (row.get(key,'') ) | e -}}</div>
+                </td>
+
+              {% endif %}
+            {% endfor %}
+          </tr>
+        {% endif %}
+
       {% endfor %}
       </tbody>
     </table>
