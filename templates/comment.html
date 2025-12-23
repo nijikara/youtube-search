@@ -3,31 +3,83 @@
 <head>
   <meta charset="utf-8" />
   <title>comments</title>
+
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
+
+  <style>
+    #comment-table th { background-color: #cfe8ff; }
+    .text-content { max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
+    .table td { max-width: 520px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+
+  <script>
+    $(document).ready(function() {
+      // URLを軽くリンク化（必要なら）
+      $('.text-content').each(function() {
+        var exp = /(https:\/\/[^\s]+)/ig;
+        var txt = $(this).html();
+        txt = txt.replace(exp, "<a href='$1' target='_blank' rel='noopener noreferrer'>$1</a>");
+        $(this).html(txt);
+      });
+
+      $("#comment-table").tablesorter({
+        // 0=publishedAt, 1=likeCount, 2=replyCount, 3=author, 4=text, 5=link
+        headers: {
+          4: { sorter: false }, // 本文はソート不要ならfalse
+          5: { sorter: false }
+        }
+      });
+    });
+  </script>
 </head>
+
 <body>
-  <div class="container my-3">
-    <h4>コメント</h4>
+  <div class="container-fluid my-3">
+    <div class="d-flex align-items-center">
+      <h4 class="mb-0 mr-3">コメント一覧</h4>
+      {% if watch_url %}
+        <a class="btn btn-sm btn-outline-primary" href="{{ watch_url }}" target="_blank">動画を開く</a>
+      {% endif %}
+      <a class="btn btn-sm btn-outline-secondary ml-2" href="/">検索に戻る</a>
+    </div>
 
     {% if error %}
-      <div class="alert alert-danger">{{ error }}</div>
+      <div class="alert alert-danger mt-3">{{ error }}</div>
     {% endif %}
 
-    {% if video_id %}
-      <div class="mb-2">
-        Video: <a href="{{ watch_url }}" target="_blank">{{ watch_url }}</a>
-      </div>
-    {% endif %}
-
-    <ul class="list-group">
-      {% for c in comments %}
-        <li class="list-group-item">
-          <div><strong>{{ c.author }}</strong>（👍 {{ c.likeCount }}）</div>
-          <div style="white-space:pre-wrap;">{{ c.text }}</div>
-          <div class="text-muted" style="font-size: 12px;">{{ c.publishedAt }}</div>
-        </li>
-      {% endfor %}
-    </ul>
+    <div class="mt-3">
+      <table id="comment-table" class="table table-bordered tablesorter">
+        <thead>
+          <tr>
+            <th>投稿日</th>
+            <th>👍</th>
+            <th>返信</th>
+            <th>投稿者</th>
+            <th>本文</th>
+            <th>リンク</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in comments %}
+            <tr>
+              <td class="mono">{{ c.publishedAt }}</td>
+              <td>{{ c.likeCount }}</td>
+              <td>{{ c.replyCount }}</td>
+              <td>{{ c.author }}</td>
+              <td><div class="text-content">{{ c.text }}</div></td>
+              <td>
+                <a href="{{ c.commentUrl }}" target="_blank" rel="noopener noreferrer">開く</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
 
     {% if next_page_token %}
       <div class="mt-3">

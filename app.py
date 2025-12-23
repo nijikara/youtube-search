@@ -4,6 +4,8 @@ import time
 import urllib.parse
 import aiohttp
 from quart import Quart, request, render_template, jsonify
+import urllib.parse
+import aiohttp
 
 import search_youtube
 
@@ -74,6 +76,7 @@ def extract_video_id(s: str) -> str | None:
 
 
 # --------- コメント取得：クリックした動画だけ叩く ---------
+
 async def fetch_comments(video_id: str, page_token: str = "", max_results: int = 50):
     params = {
         "part": "snippet",
@@ -98,12 +101,20 @@ async def fetch_comments(video_id: str, page_token: str = "", max_results: int =
 
     comments = []
     for it in body.get("items", []):
-        top = it.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        top = it.get("snippet", {}).get("topLevelComment", {})
+        top_snip = top.get("snippet", {}) or {}
+
+        comment_id = top.get("id", "")
+        reply_count = it.get("snippet", {}).get("totalReplyCount", 0)
+
         comments.append({
-            "author": top.get("authorDisplayName", ""),
-            "text": top.get("textOriginal") or top.get("textDisplay") or "",
-            "likeCount": top.get("likeCount", 0),
-            "publishedAt": top.get("publishedAt", ""),
+            "publishedAt": top_snip.get("publishedAt", ""),   # ISOでソートしやすい
+            "author": top_snip.get("authorDisplayName", ""),
+            "likeCount": top_snip.get("likeCount", 0),
+            "replyCount": reply_count,
+            "text": top_snip.get("textOriginal") or top_snip.get("textDisplay") or "",
+            "commentId": comment_id,
+            "commentUrl": f"https://www.youtube.com/watch?v={video_id}&lc={comment_id}" if comment_id else f"https://www.youtube.com/watch?v={video_id}",
         })
 
     return comments, body.get("nextPageToken", ""), None
