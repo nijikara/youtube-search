@@ -151,20 +151,29 @@ async def search_youtube(
                             comments = []
 
                     valid.append({
+                        # 生値（比較・計算用）
+                        "viewCount": int(b.get("viewCount", 0)),
+                        "likeCount": int(b.get("likeCount", 0)),
+                        "commentCount": int(b.get("commentCount", 0)),
+                        "subscriberCount": int(b.get("subscriberCount", 0)),
+                    
+                        # 表示用（カンマ区切り）
+                        "viewCountText": fmt_count(b.get("viewCount", 0)),
+                        "likeCountText": fmt_count(b.get("likeCount", 0)),
+                        "commentCountText": fmt_count(b.get("commentCount", 0)),
+                        "subscriberCountText": fmt_count(b.get("subscriberCount", 0)),
+                    
                         "publishedAt": common.change_time(b["publishedAt"]),
                         "title": b["title"],
                         "description": b["description"],
-                        "viewCount": b["viewCount"],
-                        "likeCount": b.get("likeCount", 0),
-                        "commentCount": b.get("commentCount", 0),
                         "videoDuration": b["videoDuration"],
                         "thumbnails": b["thumbnails"],
                         "video_url": video_urls[i] if i < len(video_urls) else f"https://www.youtube.com/watch?v={video_id}",
                         "name": b.get("name", "Unknown"),
-                        "subscriberCount": b.get("subscriberCount", 0),
                         "channel_icon": [b.get("channel_url", ""), b.get("channel_icon", "")],
                         "comment": comments,
                     })
+
 
                 outputs.extend(valid)
                 total_collected = len(outputs)
@@ -334,3 +343,10 @@ def get_youtube_channel_id(s: str) -> str:
         return items[0]["id"]["channelId"]
 
     raise ValueError(f"Channel not found: {s}")
+
+def fmt_count(v) -> str:
+    """数値っぽいものを '12,345' 形式にする。失敗したら '0'."""
+    try:
+        return f"{int(v):,}"
+    except Exception:
+        return "0"

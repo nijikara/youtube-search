@@ -1,96 +1,142 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-<meta charset="utf-8" />
-<title>search_youtube</title>
-<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
-<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
-<style>
-#fav-table th {
-    background-color:pink;
-}
-.text-content,
-.comment-table {
-    max-height: 100px; /* Adjust the maximum height as needed */
-    overflow-y: auto;
-}
-.table td {
-    max-width: 420px;
-}
-</style>
-<script>
+  <meta charset="utf-8" />
+  <title>search_youtube</title>
+
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+        crossorigin="anonymous">
+
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
+
+  <style>
+    #fav-table th {
+      background-color: pink;
+    }
+    .text-content,
+    .comment-table {
+      max-height: 100px;
+      overflow-y: auto;
+    }
+    .table td {
+      max-width: 420px;
+    }
+  </style>
+
+  <script>
     $(document).ready(function() {
-        // body全体ではなく、特定の要素だけを対象にする
-        $('.text-content').each(function() {
-            // YouTubeのリンクを置換する正規表現
-            var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-            // ハッシュタグの置換用正規表現
-            var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
+      $('.text-content').each(function() {
+        // YouTubeリンク置換
+        var exp = /(\https:\/\/www.youtube.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        // ハッシュタグ置換
+        var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
 
-            var txt = $(this).html();  // .text()から.html()に変更して、既存のリンクを保持
-            txt = txt.replace(exp, "<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>");
-            txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>");
-            
-            $(this).html(txt);
-        });
+        var txt = $(this).html();
+        txt = txt.replace(exp, "<a href='$1' target='_blank'><img height='20' src='images/logo.svg'></a>");
+        txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank'>#$1</a>");
 
-        // テーブルソートの初期化
-        $('#fav-table').tablesorter();
+        $(this).html(txt);
+      });
+
+      $('#fav-table').tablesorter();
     });
-</script>
+  </script>
 </head>
+
 <body>
-<div class="card-body">
-    <div>検索結果: {{ sorce | length }}件</div> <!-- 件数を表示する部分 -->
+  <div class="card-body">
+    <div>検索結果: {{ sorce | length }}件</div>
+
+    {# 表示カラム順を固定（ここが列ズレ防止の核） #}
+    {% set cols = [
+      'publishedAt',
+      'title',
+      'description',
+      'viewCount',
+      'likeCount',
+      'commentCount',
+      'videoDuration',
+      'thumbnails',
+      'video_url',
+      'name',
+      'subscriberCount',
+      'channel_icon'
+    ] %}
+
     <table id="fav-table" class="table table-bordered">
-        <thead><tr><th>投稿日時</th><th>タイトル</th><th sortable>概要</th><th>再生数</th><th>高評価数</th><th>コメント数</th><th>動画時間</th><th>サムネイル</th>
-            <th>URL</th><th>チャンネル名</th><th>登録者数</th><th>チャンネルURL</th>
-            {% if is_get_comment %}
+      <thead>
+        <tr>
+          <th>投稿日時</th>
+          <th>タイトル</th>
+          <th>概要</th>
+          <th>再生数</th>
+          <th>高評価数</th>
+          <th>コメント数</th>
+          <th>動画時間</th>
+          <th>サムネイル</th>
+          <th>URL</th>
+          <th>チャンネル名</th>
+          <th>登録者数</th>
+          <th>チャンネルURL</th>
+          {% if is_get_comment %}
             <th>コメント</th>
-            {% endif %}
-            </tr></thead>
-            {% for dict in sorce %}
-            <tr>
-                {% for info in dict %}
-                <td>
-                    {% if info =='thumbnails' %}
-                        <a href="{{dict[info]}}" target="_blank">
-                            <img src="{{dict[info]}}" height="100">
-                        </a>
-                    {% elif info =='channel_icon' %}
-                        <a href="{{dict['channel_icon'][0]}}" target="_blank">
-                            <img src="{{dict['channel_icon'][1]}}" height="100">
-                        </a>
-                    {% elif info == 'commentCount' %}
-                        <a href="/comment?video-id={{ dict['video_url'] }}" target="_blank">{{ dict['commentCount'] }}</a>
-                    {% elif info =='video_url' %}
-                    <div class="text-content">{{dict[info] | safe}}</div>
-                    {% elif info == 'comment' %}
-                    <div class="comment-table">
-                        <table class="table">
-                            <thead>
-                            </thead>
-                            <tbody>
-                                {% for item in dict[info] %}
-                                    <tr>
-                                        <td>{{ item}}</td>
-                                        <!-- Add more cells if needed -->
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                        <div class="text-content">{{dict[info] | safe}}</div>
-                    {% endif %}
-                </td>
-                {% endfor %}
-            </tr>
-            {% endfor %}
+          {% endif %}
+        </tr>
+      </thead>
+
+      <tbody>
+      {% for row in sorce %}
+        <tr>
+          {% for key in cols %}
+            <td>
+              {% if key == 'thumbnails' %}
+                <a href="{{ row[key] }}" target="_blank">
+                  <img src="{{ row[key] }}" height="100">
+                </a>
+
+              {% elif key == 'channel_icon' %}
+                <a href="{{ row['channel_icon'][0] }}" target="_blank">
+                  <img src="{{ row['channel_icon'][1] }}" height="100">
+                </a>
+
+              {% elif key == 'commentCount' %}
+                <a href="/comment?video-id={{ row['video_url'] }}" target="_blank">
+                  {{ "{:,}".format(row['commentCount']|int) }}
+                </a>
+
+              {% elif key in ['viewCount', 'likeCount', 'subscriberCount'] %}
+                <div class="text-content">{{ "{:,}".format(row[key]|int) }}</div>
+
+              {% elif key == 'video_url' %}
+                <div class="text-content">{{ row[key] | safe }}</div>
+
+              {% else %}
+                <div class="text-content">{{ row[key] | safe }}</div>
+              {% endif %}
+            </td>
+          {% endfor %}
+
+          {% if is_get_comment %}
+            <td>
+              <div class="comment-table">
+                <table class="table">
+                  <tbody>
+                    {% for item in row['comment'] %}
+                      <tr><td>{{ item }}</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
     </table>
-    </div>
+  </div>
 </body>
 </html>
