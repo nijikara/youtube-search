@@ -1,8 +1,8 @@
 import os
 import re
-import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from quart import Quart, request, render_template, Response
@@ -22,7 +22,53 @@ JST = timezone(timedelta(hours=9))
 
 
 # ---------------------------
-# Common helpers
+# Quota (estimate)
+# ---------------------------
+class QuotaTracker:
+    # YouTube Data API: daily quota is typically 10,000 units (per project).
+    # API doesn't provide "remaining", so this is an estimate for THIS process.
+    DAILY_LIMIT = int(os.environ.get("YT_QUOTA_DAILY_LIMIT") or "10000")
+
+    def __init__(self):
+        self.counts = {}  # method -> count
+
+    def add(self, method: str, units: int = 1):
+        self.counts[method] = self.counts.get(method, 0) + int(units)
+
+    def used(self) -> int:
+        return sum(self.counts.values())
+
+    def remaining(self) -> int:
+        return max(0, self.DAILY_LIMIT - self.used())
+
+    def reset_at_jst_str(self) -> str:
+        # quota resets at midnight America/Los_Angeles (DST handled)
+        try:
+            la = ZoneInfo("America/Los_Angeles")
+            now_la = datetime.now(la)
+            tomorrow_midnight_la = datetime(
+                now_la.year, now_la.month, now_la.day, 0, 0, 0, tzinfo=la
+            ) + timedelta(days=1)
+            reset_jst = tomorrow_midnight_la.astimezone(ZoneInfo("Asia/Tokyo"))
+            return reset_jst.strftime("%Y-%m-%d %H:%M:%S JST")
+        except Exception:
+            return ""
+
+    def snapshot_dict(self) -> dict:
+        return {
+            "used_estimate": self.used(),
+            "remaining_estimate": self.remaining(),
+            "reset_at_jst": self.reset_at_jst_str(),
+            "note": "estimate (this process only)",
+            "by_method": self.counts,
+        }
+
+
+quota = QuotaTracker()
+
+
+# ---------------------------
+# Helpers
 # ---------------------------
 def _iso_to_jst_str(iso: str) -> str:
     try:
@@ -32,8 +78,16 @@ def _iso_to_jst_str(iso: str) -> str:
         return iso or ""
 
 
+def _iso_to_epoch(iso: str) -> int:
+    try:
+        dt = datetime.fromisoformat((iso or "").replace("Z", "+00:00")).astimezone(timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return 0
+
+
 def _trim_outer_blank_lines(s: str) -> str:
-    # コメント内の改行は残す／先頭末尾の空行だけ落とす
+    # keep internal newlines; remove only leading/trailing blank lines
     s = (s or "").replace("\r\n", "\n").replace("\r", "\n")
     s = re.sub(r"^\s*\n+", "", s)
     s = re.sub(r"\n+\s*$", "", s)
@@ -42,7 +96,9 @@ def _trim_outer_blank_lines(s: str) -> str:
 
 def _user_id_from(author_channel_url: str, author_name: str) -> str:
     """
-    可能なら @handle を出す。なければ UC...、それも無理なら表示名。
+    Prefer @handle if present in authorChannelUrl.
+    Else channel UC... if present.
+    Else fallback to display name.
     """
     u = (author_channel_url or "").strip()
     try:
@@ -72,17 +128,20 @@ def extract_video_id(s: str) -> str | None:
         host = (p.netloc or "").lower()
         path = (p.path or "").strip("/")
 
+        # youtu.be/<id>
         if "youtu.be" in host and path:
             cand = path.split("/")[0]
             if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
                 return cand
 
+        # watch?v=<id>
         qs = urllib.parse.parse_qs(p.query or "")
         if "v" in qs and qs["v"]:
             cand = qs["v"][0]
             if re.fullmatch(r"[0-9A-Za-z_-]{11}", cand):
                 return cand
 
+        # /shorts/<id>, /embed/<id>, /video/<id>
         parts = path.split("/")
         for i, token in enumerate(parts):
             if token in ("shorts", "embed", "video") and i + 1 < len(parts):
@@ -96,31 +155,21 @@ def extract_video_id(s: str) -> str | None:
     return m.group(1) if m else None
 
 
-async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict, quota_method: str):
-    # クォータ推定カウント（search_youtube 側にある前提）
-    if hasattr(search_youtube, "quota") and hasattr(search_youtube.quota, "add"):
-        search_youtube.quota.add(quota_method)
-
+async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict, method: str):
+    quota.add(method, 1)
     url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
     async with session.get(url) as resp:
         text = await resp.text()
+        if resp.status == 403 and "quotaExceeded" in text:
+            raise RuntimeError(f"{endpoint} failed 403: {text}")
+        if resp.status != 200:
+            raise RuntimeError(f"{endpoint} failed {resp.status}: {text}")
         try:
             js = await resp.json()
         except Exception:
-            js = None
-
-        if resp.status == 403 and (text and "quotaExceeded" in text):
-            raise search_youtube.QuotaExceededError(f"{endpoint} failed 403: {text}")
-
-        if resp.status != 200:
-            raise RuntimeError(f"{endpoint} failed {resp.status}: {text}")
-
-        if js is None:
             raise RuntimeError(f"{endpoint} invalid json: {text}")
-
         if "error" in js:
             raise RuntimeError(str(js["error"]))
-
         return js
 
 
@@ -149,7 +198,7 @@ async def home():
         title="search_youtube",
         sorce=[],
         form=default_form(),
-        quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
+        quota=quota.snapshot_dict(),
     )
 
 
@@ -167,18 +216,21 @@ async def scraping():
     video_count = request.args.get("video-count", "200")
     order = request.args.get("order", "date")
 
-    sorce = await search_youtube.search_youtube(
-        channel_id_input=channel_id,
-        key_word=word,
-        published_from=from_date,
-        published_to=to_date,
-        viewcount_min=viewcount_min,
-        subscribercount_min=sub_min,
-        video_count=video_count,
-        viewcount_max=viewcount_max,
-        subscribercount_max=sub_max,
-        order=order,
-    )
+    try:
+        sorce = await search_youtube.search_youtube(
+            channel_id_input=channel_id,
+            key_word=word,
+            published_from=from_date,
+            published_to=to_date,
+            viewcount_min=viewcount_min,
+            subscribercount_min=sub_min,
+            video_count=video_count,
+            viewcount_max=viewcount_max,
+            subscribercount_max=sub_max,
+            order=order,
+        )
+    except Exception as e:
+        sorce = [{"error": str(e)}]
 
     form = {
         "word": word,
@@ -198,7 +250,7 @@ async def scraping():
         title="search_youtube",
         sorce=sorce,
         form=form,
-        quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
+        quota=quota.snapshot_dict(),
     )
 
 
@@ -215,7 +267,7 @@ async def comment():
 
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # 1) 動画情報（タイトル＆サムネ）
+    # 1) Video info (title + thumbnail)
     video_title = ""
     video_thumb = ""
     channel_title = ""
@@ -227,17 +279,19 @@ async def comment():
             body = await yt_get_json(session, "videos", params, "videos.list")
             items = body.get("items") or []
             if items:
-                sn = (items[0].get("snippet") or {})
+                sn = items[0].get("snippet") or {}
                 video_title = sn.get("title", "") or ""
                 channel_title = sn.get("channelTitle", "") or ""
                 video_thumb = (((sn.get("thumbnails") or {}).get("high") or {}).get("url")) or ""
         except Exception:
-            # ここ落ちてもページ自体は出す
             pass
 
-    # 2) コメント取得（threads or replies）
+    # 2) Comments (up to 500 at once)
     rows = []
     next_token = ""
+    error = ""
+
+    MAX_ROWS = 500
 
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -245,32 +299,35 @@ async def comment():
                 if not parent_id:
                     return Response("missing parent-id for replies", status=400)
 
-                params = {
-                    "part": "snippet",
-                    "parentId": parent_id,
-                    "maxResults": 100,
-                    "textFormat": "plainText",
-                    "key": API_KEY,
-                }
-                if page_token:
-                    params["pageToken"] = page_token
-
-                body = await yt_get_json(session, "comments", params, "comments.list")
-                next_token = (body.get("nextPageToken") or "").strip()
-
+                token = page_token
                 idx = 0
-                for it in (body.get("items") or []):
-                    idx += 1
-                    sn = (it.get("snippet") or {})
-                    author = sn.get("authorDisplayName", "") or ""
-                    author_url = sn.get("authorChannelUrl", "") or ""
-                    icon = sn.get("authorProfileImageUrl", "") or ""
-                    cid = it.get("id", "") or ""
-                    published_iso = sn.get("publishedAt", "") or ""
-                    rows.append(
-                        {
+                while True:
+                    params = {
+                        "part": "snippet",
+                        "parentId": parent_id,
+                        "maxResults": 100,
+                        "textFormat": "plainText",
+                        "key": API_KEY,
+                    }
+                    if token:
+                        params["pageToken"] = token
+
+                    body = await yt_get_json(session, "comments", params, "comments.list")
+                    token = (body.get("nextPageToken") or "").strip()
+
+                    for it in (body.get("items") or []):
+                        idx += 1
+                        sn = it.get("snippet") or {}
+                        author = sn.get("authorDisplayName", "") or ""
+                        author_url = sn.get("authorChannelUrl", "") or ""
+                        icon = sn.get("authorProfileImageUrl", "") or ""
+                        cid = it.get("id", "") or ""
+                        published_iso = sn.get("publishedAt", "") or ""
+
+                        rows.append({
                             "no": str(idx),
                             "publishedAtIso": published_iso,
+                            "publishedAtEpoch": _iso_to_epoch(published_iso),
                             "publishedAt": _iso_to_jst_str(published_iso),
                             "text": _trim_outer_blank_lines(sn.get("textOriginal") or sn.get("textDisplay") or ""),
                             "likeCount": sn.get("likeCount", 0) or 0,
@@ -280,41 +337,54 @@ async def comment():
                             "iconUrl": icon,
                             "commentId": cid,
                             "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
-                        }
-                    )
+                            "repliesUrl": "",
+                        })
+
+                        if idx >= MAX_ROWS:
+                            next_token = token
+                            break
+
+                    if idx >= MAX_ROWS:
+                        break
+                    if not token:
+                        next_token = ""
+                        break
+
             else:
-                params = {
-                    "part": "snippet",
-                    "videoId": video_id,
-                    "maxResults": 100,
-                    "order": "relevance",
-                    "textFormat": "plainText",
-                    "key": API_KEY,
-                }
-                if page_token:
-                    params["pageToken"] = page_token
-
-                body = await yt_get_json(session, "commentThreads", params, "commentThreads.list")
-                next_token = (body.get("nextPageToken") or "").strip()
-
+                token = page_token
                 idx = 0
-                for th in (body.get("items") or []):
-                    idx += 1
-                    sn = (th.get("snippet") or {})
-                    top = (sn.get("topLevelComment") or {})
-                    top_sn = (top.get("snippet") or {})
-                    total_reply = sn.get("totalReplyCount", 0) or 0
+                while True:
+                    params = {
+                        "part": "snippet",
+                        "videoId": video_id,
+                        "maxResults": 100,
+                        "order": "relevance",
+                        "textFormat": "plainText",
+                        "key": API_KEY,
+                    }
+                    if token:
+                        params["pageToken"] = token
 
-                    author = top_sn.get("authorDisplayName", "") or ""
-                    author_url = top_sn.get("authorChannelUrl", "") or ""
-                    icon = top_sn.get("authorProfileImageUrl", "") or ""
-                    cid = top.get("id", "") or ""
-                    published_iso = top_sn.get("publishedAt", "") or ""
+                    body = await yt_get_json(session, "commentThreads", params, "commentThreads.list")
+                    token = (body.get("nextPageToken") or "").strip()
 
-                    rows.append(
-                        {
+                    for th in (body.get("items") or []):
+                        idx += 1
+                        sn = th.get("snippet") or {}
+                        top = sn.get("topLevelComment") or {}
+                        top_sn = top.get("snippet") or {}
+                        total_reply = sn.get("totalReplyCount", 0) or 0
+
+                        author = top_sn.get("authorDisplayName", "") or ""
+                        author_url = top_sn.get("authorChannelUrl", "") or ""
+                        icon = top_sn.get("authorProfileImageUrl", "") or ""
+                        cid = top.get("id", "") or ""
+                        published_iso = top_sn.get("publishedAt", "") or ""
+
+                        rows.append({
                             "no": str(idx),
                             "publishedAtIso": published_iso,
+                            "publishedAtEpoch": _iso_to_epoch(published_iso),
                             "publishedAt": _iso_to_jst_str(published_iso),
                             "text": _trim_outer_blank_lines(top_sn.get("textOriginal") or top_sn.get("textDisplay") or ""),
                             "likeCount": top_sn.get("likeCount", 0) or 0,
@@ -324,47 +394,26 @@ async def comment():
                             "iconUrl": icon,
                             "commentId": cid,
                             "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
-                            "repliesUrl": f"/comment?video-id={video_id}&mode=replies&parent-id={cid}" if cid and total_reply > 0 else "",
-                        }
-                    )
+                            "repliesUrl": f"/comment?video-id={video_id}&mode=replies&parent-id={cid}" if cid and int(total_reply) > 0 else "",
+                        })
 
-    except search_youtube.QuotaExceededError as e:
-        return await render_template(
-            "comment.html",
-            title="Comments",
-            quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
-            watch_url=watch_url,
-            video_title=video_title,
-            video_thumb=video_thumb,
-            channel_title=channel_title,
-            mode=mode,
-            parent_id=parent_id,
-            rows=[],
-            next_page_token="",
-            error=str(e),
-            video_id=video_id,
-        )
+                        if idx >= MAX_ROWS:
+                            next_token = token
+                            break
+
+                    if idx >= MAX_ROWS:
+                        break
+                    if not token:
+                        next_token = ""
+                        break
+
     except Exception as e:
-        return await render_template(
-            "comment.html",
-            title="Comments",
-            quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
-            watch_url=watch_url,
-            video_title=video_title,
-            video_thumb=video_thumb,
-            channel_title=channel_title,
-            mode=mode,
-            parent_id=parent_id,
-            rows=[],
-            next_page_token="",
-            error=str(e),
-            video_id=video_id,
-        )
+        error = str(e)
 
     return await render_template(
         "comment.html",
         title="Comments",
-        quota=search_youtube.quota_snapshot_dict() if hasattr(search_youtube, "quota_snapshot_dict") else {},
+        quota=quota.snapshot_dict(),
         watch_url=watch_url,
         video_title=video_title,
         video_thumb=video_thumb,
@@ -373,6 +422,6 @@ async def comment():
         parent_id=parent_id,
         rows=rows,
         next_page_token=next_token,
-        error="",
+        error=error,
         video_id=video_id,
     )

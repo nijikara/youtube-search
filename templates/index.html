@@ -25,9 +25,9 @@
     .text-content { max-height: 110px; overflow-y: auto; white-space: pre-wrap; }
     .table td { max-width: 520px; vertical-align: top; }
     .thumb img { border-radius: 6px; }
-    .quota-box { background: #f7f7f7; border-radius: 10px; padding: 10px 12px; }
-    .muted { color: #666; }
-    .small { font-size: 12px; }
+    .quota-box { background:#f7f7f7; border-radius:10px; padding:10px 12px; font-size:12px; }
+    .muted { color:#666; }
+    .small { font-size:12px; }
     .nowrap { white-space: nowrap; }
     .sticky-top-2 { position: sticky; top: 0; z-index: 2; background: #fff; padding-top: 8px; }
     .error-row { background: #fff3cd; }
@@ -56,14 +56,16 @@
     }
 
     $(function(){
+      // quota
       try{
-        const quota = JSON.parse(document.getElementById("quota-json").textContent || "{}");
-        $("#quota-used").text(fmt(quota.used ?? quota.used_estimate ?? 0));
-        $("#quota-remaining").text(fmt(quota.remaining ?? quota.remaining_estimate ?? ""));
-        $("#quota-reset").text(String(quota.reset_at_jst ?? quota.reset ?? ""));
-        if (quota.note) $("#quota-note").text(String(quota.note));
+        const q = JSON.parse(document.getElementById("quota-json").textContent || "{}");
+        $("#quota-used").text(fmt(q.used_estimate ?? 0));
+        $("#quota-remaining").text(fmt(q.remaining_estimate ?? ""));
+        $("#quota-reset").text(String(q.reset_at_jst ?? ""));
+        $("#quota-note").text(String(q.note ?? ""));
       }catch(e){}
 
+      // table sort
       $("#fav-table").tablesorter({
         theme: "default",
         textExtraction: function(node){
@@ -79,6 +81,14 @@
       });
 
       linkifyAndHashtagify($(document));
+
+      // 検索フォーム開閉時にそこへ飛ぶ
+      $("#searchPanel").on("shown.bs.collapse", function () {
+        document.getElementById("searchPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      $("#searchPanel").on("hidden.bs.collapse", function () {
+        document.getElementById("toggleSearchBtn").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
   </script>
 </head>
@@ -86,16 +96,17 @@
 <body>
 
   <div class="sticky-top-2">
-    <div class="d-flex justify-content-between align-items-center">
+    <div class="d-flex justify-content-between align-items-start">
       <h4 class="m-0">YouTube 検索</h4>
-      <div class="quota-box small">
+      <div class="quota-box">
         <div><strong>Quota</strong> used: <span id="quota-used"></span> / remaining: <span id="quota-remaining"></span></div>
         <div class="muted">reset: <span id="quota-reset"></span> <span id="quota-note"></span></div>
       </div>
     </div>
 
     <div class="mt-2">
-      <button class="btn btn-sm btn-outline-primary" type="button" data-toggle="collapse" data-target="#searchPanel"
+      <button id="toggleSearchBtn" class="btn btn-sm btn-outline-primary" type="button"
+              data-toggle="collapse" data-target="#searchPanel"
               aria-expanded="false" aria-controls="searchPanel">
         検索フォームを開く / 閉じる
       </button>
@@ -113,6 +124,7 @@
   <div id="searchPanel" class="collapse {% if not sorce %}show{% endif %} mt-3">
     <div class="card">
       <div class="card-body">
+
         <form method="GET" action="/scraping">
           <div class="form-row">
             <div class="form-group col-md-4">
@@ -156,6 +168,7 @@
               <label>再生数下限</label>
               <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min }}">
             </div>
+
             <div class="form-group col-md-3">
               <label>再生数上限</label>
               <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max }}">
@@ -167,6 +180,7 @@
               <label>登録者数下限</label>
               <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min }}">
             </div>
+
             <div class="form-group col-md-3">
               <label>登録者数上限</label>
               <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max }}">
@@ -182,7 +196,7 @@
 
         <form method="GET" action="/comment" class="form-inline">
           <label class="mr-2">動画URL / ID（コメント表示）</label>
-          <input type="text" class="form-control mr-2" name="video-id" style="min-width: 420px;">
+          <input type="text" class="form-control mr-2" name="video-id" style="min-width:420px;">
           <button type="submit" class="btn btn-outline-secondary">コメント表示</button>
         </form>
 
@@ -226,19 +240,19 @@
 
       <tbody>
       {% for row in sorce %}
-
-        {# もしエラー行（{"error": "..."}）が混ざってても落ちないように表示 #}
         {% if row.get('error') %}
           <tr class="error-row">
-            <td colspan="12">
-              <strong>ERROR:</strong> {{ row.get('error') }}
-            </td>
+            <td colspan="12"><strong>ERROR:</strong> {{ row.get('error') }}</td>
           </tr>
         {% else %}
           <tr>
             {% for key in cols %}
 
-              {% if key in ['viewCount','likeCount','commentCount','subscriberCount'] %}
+              {% if key == 'publishedAt' %}
+                {% set v = row.get(key, '') %}
+                <td class="nowrap" data-sort-value="{{ v }}">{{ v }}</td>
+
+              {% elif key in ['viewCount','likeCount','commentCount','subscriberCount'] %}
                 {% set val = (row.get(key, 0) | int) %}
                 <td class="nowrap" data-sort-value="{{ val }}">
                   {% if key == 'commentCount' %}
@@ -284,7 +298,6 @@
             {% endfor %}
           </tr>
         {% endif %}
-
       {% endfor %}
       </tbody>
     </table>

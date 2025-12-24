@@ -24,7 +24,7 @@
     .muted { color:#666; }
     .quota-box { background:#f7f7f7; border-radius:10px; padding:10px 12px; font-size:12px; }
     #comment-table th { background-color: #b8f3ff; }
-    .comment-text { white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
+    .comment-text { white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
     .nowrap { white-space: nowrap; }
     .icon img { border-radius: 50%; }
     .small { font-size: 12px; }
@@ -38,12 +38,11 @@
     }
 
     $(function(){
-      // quota表示（あれば）
       try{
-        const quota = JSON.parse(document.getElementById("quota-json").textContent || "{}");
-        $("#quota-used").text(fmt(quota.used ?? quota.used_estimate ?? 0));
-        $("#quota-remaining").text(fmt(quota.remaining ?? quota.remaining_estimate ?? ""));
-        $("#quota-reset").text(String(quota.reset_at_jst ?? quota.reset ?? ""));
+        const q = JSON.parse(document.getElementById("quota-json").textContent || "{}");
+        $("#quota-used").text(fmt(q.used_estimate ?? 0));
+        $("#quota-remaining").text(fmt(q.remaining_estimate ?? ""));
+        $("#quota-reset").text(String(q.reset_at_jst ?? ""));
       }catch(e){}
 
       $("#comment-table").tablesorter({
@@ -54,6 +53,7 @@
         },
         headers: {
           0: { sorter: "digit" }, // No
+          1: { sorter: "digit" }, // 投稿日 (epoch)
           3: { sorter: "digit" }, // Like
           4: { sorter: "digit" }  // Reply
         }
@@ -84,10 +84,10 @@
         {% endif %}
         <div class="small muted">
           {% if mode == "replies" %}
-            返信一覧モード
-            <a href="/comment?video-id={{ video_id }}" class="ml-2">← トップコメント一覧へ</a>
+            返信一覧（最大500件）
+            <a href="/comment?video-id={{ video_id }}" class="ml-2">← トップへ戻る</a>
           {% else %}
-            トップコメント一覧モード
+            トップコメント（最大500件）
           {% endif %}
         </div>
       </div>
@@ -100,9 +100,7 @@
   </div>
 
   {% if error %}
-    <div class="alert alert-warning">
-      {{ error }}
-    </div>
+    <div class="alert alert-warning">{{ error }}</div>
   {% endif %}
 
   <table id="comment-table" class="table table-bordered table-sm">
@@ -124,13 +122,11 @@
         <tr>
           <td class="nowrap" data-sort-value="{{ row.get('no','0')|int }}">{{ row.get('no','') }}</td>
 
-          <td class="nowrap" data-sort-value="{{ row.get('publishedAtIso','') }}">
+          <td class="nowrap" data-sort-value="{{ row.get('publishedAtEpoch',0)|int }}">
             {{ row.get('publishedAt','') }}
           </td>
 
-          <td>
-            <div class="comment-text">{{- row.get('text','') | e -}}</div>
-          </td>
+          <td><div class="comment-text">{{- row.get('text','') | e -}}</div></td>
 
           <td class="nowrap" data-sort-value="{{ row.get('likeCount',0)|int }}">
             {{ "{:,}".format(row.get('likeCount',0)|int) }}
@@ -138,9 +134,7 @@
 
           <td class="nowrap" data-sort-value="{{ row.get('replyCount',0)|int }}">
             {% if mode != "replies" and row.get('replyCount',0)|int > 0 and row.get('repliesUrl','') %}
-              <a href="{{ row.get('repliesUrl','') }}">
-                {{ "{:,}".format(row.get('replyCount',0)|int) }}
-              </a>
+              <a href="{{ row.get('repliesUrl','') }}">{{ "{:,}".format(row.get('replyCount',0)|int) }}</a>
             {% else %}
               {{ "{:,}".format(row.get('replyCount',0)|int) }}
             {% endif %}
