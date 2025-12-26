@@ -114,7 +114,12 @@
       <span class="ml-2 small muted">
         検索結果: <strong>{{ sorce | length }}</strong> 件
       </span>
-      <div class="small muted">DEBUG share_sid={{ share_sid }}</div>
+      <div class="small text-muted">
+        DEBUG share_sid={{ share_sid|default('<<UNDEFINED>>') }} /
+          len={{ sorce|length }} /
+          first_error={{ (sorce[0].get('error') if sorce and sorce[0] is mapping else '') }}
+      </div>
+
 
       {% if share_sid and sorce and (sorce | length) > 0 %}
         <a class="btn btn-sm btn-success ml-2"
