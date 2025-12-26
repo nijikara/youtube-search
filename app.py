@@ -1,11 +1,19 @@
 import os
 import re
+import io
+import time
+import math
+import hashlib
+import textwrap
+import asyncio
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 import aiohttp
 from quart import Quart, request, render_template, Response
+
+from PIL import Image, ImageDraw, ImageFont
 
 import search_youtube
 
@@ -25,8 +33,6 @@ JST = timezone(timedelta(hours=9))
 # Quota (estimate)
 # ---------------------------
 class QuotaTracker:
-    # YouTube Data API: daily quota is typically 10,000 units (per project).
-    # API doesn't provide "remaining", so this is an estimate for THIS process.
     DAILY_LIMIT = int(os.environ.get("YT_QUOTA_DAILY_LIMIT") or "10000")
 
     def __init__(self):
@@ -42,7 +48,7 @@ class QuotaTracker:
         return max(0, self.DAILY_LIMIT - self.used())
 
     def reset_at_jst_str(self) -> str:
-        # quota resets at midnight America/Los_Angeles (DST handled)
+        # YouTube Data API quota resets at midnight America/Los_Angeles
         try:
             la = ZoneInfo("America/Los_Angeles")
             now_la = datetime.now(la)
@@ -68,7 +74,7 @@ quota = QuotaTracker()
 
 
 # ---------------------------
-# Helpers
+# Common helpers
 # ---------------------------
 def _iso_to_jst_str(iso: str) -> str:
     try:
@@ -95,11 +101,6 @@ def _trim_outer_blank_lines(s: str) -> str:
 
 
 def _user_id_from(author_channel_url: str, author_name: str) -> str:
-    """
-    Prefer @handle if present in authorChannelUrl.
-    Else channel UC... if present.
-    Else fallback to display name.
-    """
     u = (author_channel_url or "").strip()
     try:
         if u:
@@ -189,6 +190,129 @@ def default_form():
 
 
 # ---------------------------
+# Share image cache
+# ---------------------------
+SHARE_CACHE = {}
+SHARE_TTL_SEC = 20 * 60  # 20min
+
+
+def share_cache_set(sid: str, sorce: list, meta: dict):
+    SHARE_CACHE[sid] = (time.time(), sorce, meta)
+
+
+def share_cache_get(sid: str):
+    v = SHARE_CACHE.get(sid)
+    if not v:
+        return None
+    ts, sorce, meta = v
+    if time.time() - ts > SHARE_TTL_SEC:
+        SHARE_CACHE.pop(sid, None)
+        return None
+    return sorce, meta
+
+
+def make_sid(params: dict) -> str:
+    raw = repr(sorted(params.items())).encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()[:12]
+
+
+def load_font(size: int) -> ImageFont.FreeTypeFont:
+    # Put a Japanese font at: fonts/NotoSansJP-Regular.ttf
+    font_path = os.path.join("fonts", "NotoSansJP-Regular.ttf")
+    if os.path.exists(font_path):
+        return ImageFont.truetype(font_path, size=size)
+    return ImageFont.load_default()
+
+
+def wrap_title(title: str, width_chars: int = 22, max_lines: int = 2) -> str:
+    title = (title or "").strip()
+    lines = textwrap.wrap(title, width=width_chars)
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join(lines[: max_lines - 1] + [lines[max_lines - 1] + "…"])
+
+
+async def fetch_thumb(session: aiohttp.ClientSession, url: str):
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                return None
+            b = await resp.read()
+        im = Image.open(io.BytesIO(b)).convert("RGB")
+        return im
+    except Exception:
+        return None
+
+
+def resize_cover(im: Image.Image, w: int, h: int) -> Image.Image:
+    iw, ih = im.size
+    scale = max(w / iw, h / ih)
+    nw, nh = int(iw * scale), int(ih * scale)
+    im2 = im.resize((nw, nh))
+    left = (nw - w) // 2
+    top = (nh - h) // 2
+    return im2.crop((left, top, left + w, top + h))
+
+
+async def build_share_png(items: list, title_text: str, cols: int = 3, n: int = 12, width: int = 1600):
+    cols = max(2, min(int(cols), 5))
+    n = max(1, min(int(n), 50))
+    items = items[:n]
+
+    margin = 40
+    gap = 24
+    header_h = 120
+
+    card_w = (width - margin * 2 - gap * (cols - 1)) // cols
+    thumb_w = card_w
+    thumb_h = int(card_w * 9 / 16)  # 16:9
+    title_h = 92
+    card_h = thumb_h + title_h + 18
+
+    rows = math.ceil(len(items) / cols)
+    height = header_h + margin + rows * card_h + (rows - 1) * gap + margin
+
+    canvas = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    font_h1 = load_font(40)
+    font_h2 = load_font(22)
+    font_title = load_font(24)
+
+    now = datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")
+    draw.text((margin, 24), title_text, fill=(0, 0, 0), font=font_h1)
+    draw.text((margin, 74), now, fill=(90, 90, 90), font=font_h2)
+
+    async with aiohttp.ClientSession() as session:
+        thumbs = await asyncio.gather(*[fetch_thumb(session, it.get("thumbnails", "")) for it in items])
+
+    y0 = header_h + margin
+    for idx, it in enumerate(items):
+        r = idx // cols
+        c = idx % cols
+        x = margin + c * (card_w + gap)
+        y = y0 + r * (card_h + gap)
+
+        draw.rectangle([x, y, x + card_w, y + card_h], outline=(230, 230, 230), width=2)
+
+        im = thumbs[idx]
+        if im is None:
+            draw.rectangle([x, y, x + thumb_w, y + thumb_h], fill=(245, 245, 245))
+            draw.text((x + 12, y + 12), "NO IMAGE", fill=(120, 120, 120), font=font_h2)
+        else:
+            imc = resize_cover(im, thumb_w, thumb_h)
+            canvas.paste(imc, (x, y))
+
+        t = wrap_title(it.get("title", ""), width_chars=22, max_lines=2)
+        draw.multiline_text((x + 10, y + thumb_h + 10), t, fill=(0, 0, 0), font=font_title, spacing=6)
+
+    out = io.BytesIO()
+    canvas.save(out, format="PNG")
+    out.seek(0)
+    return out.getvalue()
+
+
+# ---------------------------
 # Routes
 # ---------------------------
 @app.get("/", strict_slashes=False)
@@ -199,6 +323,7 @@ async def home():
         sorce=[],
         form=default_form(),
         quota=quota.snapshot_dict(),
+        share_sid="",
     )
 
 
@@ -216,6 +341,7 @@ async def scraping():
     video_count = request.args.get("video-count", "200")
     order = request.args.get("order", "date")
 
+    # call search_youtube with compatibility fallback
     try:
         sorce = await search_youtube.search_youtube(
             channel_id_input=channel_id,
@@ -228,6 +354,13 @@ async def scraping():
             viewcount_max=viewcount_max,
             subscribercount_max=sub_max,
             order=order,
+        )
+    except TypeError:
+        # older signature fallback (positional)
+        sorce = await search_youtube.search_youtube(
+            channel_id, word, from_date, to_date,
+            viewcount_min, sub_min, video_count,
+            viewcount_max, sub_max, order
         )
     except Exception as e:
         sorce = [{"error": str(e)}]
@@ -245,183 +378,60 @@ async def scraping():
         "video_count": video_count,
     }
 
+    # share sid
+    params_for_sid = {
+        "word": word, "from": from_date, "to": to_date, "channel": channel_id,
+        "vmin": viewcount_min, "vmax": viewcount_max,
+        "smin": sub_min, "smax": sub_max,
+        "count": video_count, "order": order,
+    }
+    sid = make_sid(params_for_sid)
+    share_cache_set(sid, sorce, {"title": f"検索: {word or '(no keyword)'}"})
+
     return await render_template(
         "index.html",
         title="search_youtube",
         sorce=sorce,
         form=form,
         quota=quota.snapshot_dict(),
+        share_sid=sid,
     )
 
 
 @app.get("/comment", strict_slashes=False)
 async def comment():
+    # NOTE: comment.html is handled elsewhere; index links to /comment with video-id = URL
     raw = request.args.get("video-id", "")
-    video_id = extract_video_id(raw)
-    if not video_id:
+    vid = extract_video_id(raw)
+    if not vid:
         return Response("invalid video-id", status=400)
+    return Response("comment.html is not included in this request. Keep your existing /comment implementation.", status=501)
 
-    mode = (request.args.get("mode", "threads") or "threads").strip()  # threads / replies
-    parent_id = (request.args.get("parent-id", "") or "").strip()
-    page_token = (request.args.get("pageToken", "") or "").strip()
 
-    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+@app.get("/share_image", strict_slashes=False)
+async def share_image():
+    sid = (request.args.get("sid", "") or "").strip()
+    cols = request.args.get("cols", "3")
+    n = request.args.get("n", "12")
+    width = request.args.get("w", "1600")
+    download = (request.args.get("download", "") or "").strip()
 
-    # 1) Video info (title + thumbnail)
-    video_title = ""
-    video_thumb = ""
-    channel_title = ""
+    cached = share_cache_get(sid)
+    if not cached:
+        return Response("share cache expired. search again.", status=404)
 
-    timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
-            params = {"part": "snippet", "id": video_id, "key": API_KEY}
-            body = await yt_get_json(session, "videos", params, "videos.list")
-            items = body.get("items") or []
-            if items:
-                sn = items[0].get("snippet") or {}
-                video_title = sn.get("title", "") or ""
-                channel_title = sn.get("channelTitle", "") or ""
-                video_thumb = (((sn.get("thumbnails") or {}).get("high") or {}).get("url")) or ""
-        except Exception:
-            pass
+    sorce, meta = cached
+    items = [x for x in (sorce or []) if isinstance(x, dict) and not x.get("error")]
 
-    # 2) Comments (up to 500 at once)
-    rows = []
-    next_token = ""
-    error = ""
-
-    MAX_ROWS = 500
-
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            if mode == "replies":
-                if not parent_id:
-                    return Response("missing parent-id for replies", status=400)
-
-                token = page_token
-                idx = 0
-                while True:
-                    params = {
-                        "part": "snippet",
-                        "parentId": parent_id,
-                        "maxResults": 100,
-                        "textFormat": "plainText",
-                        "key": API_KEY,
-                    }
-                    if token:
-                        params["pageToken"] = token
-
-                    body = await yt_get_json(session, "comments", params, "comments.list")
-                    token = (body.get("nextPageToken") or "").strip()
-
-                    for it in (body.get("items") or []):
-                        idx += 1
-                        sn = it.get("snippet") or {}
-                        author = sn.get("authorDisplayName", "") or ""
-                        author_url = sn.get("authorChannelUrl", "") or ""
-                        icon = sn.get("authorProfileImageUrl", "") or ""
-                        cid = it.get("id", "") or ""
-                        published_iso = sn.get("publishedAt", "") or ""
-
-                        rows.append({
-                            "no": str(idx),
-                            "publishedAtIso": published_iso,
-                            "publishedAtEpoch": _iso_to_epoch(published_iso),
-                            "publishedAt": _iso_to_jst_str(published_iso),
-                            "text": _trim_outer_blank_lines(sn.get("textOriginal") or sn.get("textDisplay") or ""),
-                            "likeCount": sn.get("likeCount", 0) or 0,
-                            "replyCount": 0,
-                            "userId": _user_id_from(author_url, author),
-                            "authorChannelUrl": author_url,
-                            "iconUrl": icon,
-                            "commentId": cid,
-                            "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
-                            "repliesUrl": "",
-                        })
-
-                        if idx >= MAX_ROWS:
-                            next_token = token
-                            break
-
-                    if idx >= MAX_ROWS:
-                        break
-                    if not token:
-                        next_token = ""
-                        break
-
-            else:
-                token = page_token
-                idx = 0
-                while True:
-                    params = {
-                        "part": "snippet",
-                        "videoId": video_id,
-                        "maxResults": 100,
-                        "order": "relevance",
-                        "textFormat": "plainText",
-                        "key": API_KEY,
-                    }
-                    if token:
-                        params["pageToken"] = token
-
-                    body = await yt_get_json(session, "commentThreads", params, "commentThreads.list")
-                    token = (body.get("nextPageToken") or "").strip()
-
-                    for th in (body.get("items") or []):
-                        idx += 1
-                        sn = th.get("snippet") or {}
-                        top = sn.get("topLevelComment") or {}
-                        top_sn = top.get("snippet") or {}
-                        total_reply = sn.get("totalReplyCount", 0) or 0
-
-                        author = top_sn.get("authorDisplayName", "") or ""
-                        author_url = top_sn.get("authorChannelUrl", "") or ""
-                        icon = top_sn.get("authorProfileImageUrl", "") or ""
-                        cid = top.get("id", "") or ""
-                        published_iso = top_sn.get("publishedAt", "") or ""
-
-                        rows.append({
-                            "no": str(idx),
-                            "publishedAtIso": published_iso,
-                            "publishedAtEpoch": _iso_to_epoch(published_iso),
-                            "publishedAt": _iso_to_jst_str(published_iso),
-                            "text": _trim_outer_blank_lines(top_sn.get("textOriginal") or top_sn.get("textDisplay") or ""),
-                            "likeCount": top_sn.get("likeCount", 0) or 0,
-                            "replyCount": total_reply,
-                            "userId": _user_id_from(author_url, author),
-                            "authorChannelUrl": author_url,
-                            "iconUrl": icon,
-                            "commentId": cid,
-                            "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
-                            "repliesUrl": f"/comment?video-id={video_id}&mode=replies&parent-id={cid}" if cid and int(total_reply) > 0 else "",
-                        })
-
-                        if idx >= MAX_ROWS:
-                            next_token = token
-                            break
-
-                    if idx >= MAX_ROWS:
-                        break
-                    if not token:
-                        next_token = ""
-                        break
-
-    except Exception as e:
-        error = str(e)
-
-    return await render_template(
-        "comment.html",
-        title="Comments",
-        quota=quota.snapshot_dict(),
-        watch_url=watch_url,
-        video_title=video_title,
-        video_thumb=video_thumb,
-        channel_title=channel_title,
-        mode=mode,
-        parent_id=parent_id,
-        rows=rows,
-        next_page_token=next_token,
-        error=error,
-        video_id=video_id,
+    png = await build_share_png(
+        items=items,
+        title_text=meta.get("title", "YouTube Search"),
+        cols=int(cols),
+        n=int(n),
+        width=int(width),
     )
+
+    headers = {"Content-Type": "image/png"}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="share_{sid}.png"'
+    return Response(png, headers=headers)

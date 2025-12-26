@@ -73,10 +73,10 @@
           return (v !== undefined && v !== null) ? v : $(node).text();
         },
         headers: {
-          3: { sorter: "digit" },
-          4: { sorter: "digit" },
-          5: { sorter: "digit" },
-          10:{ sorter: "digit" }
+          3: { sorter: "digit" },  // view
+          4: { sorter: "digit" },  // like
+          5: { sorter: "digit" },  // comment
+          10:{ sorter: "digit" }   // subscriber
         }
       });
 
@@ -104,7 +104,7 @@
       </div>
     </div>
 
-    <div class="mt-2">
+    <div class="mt-2 d-flex align-items-center flex-wrap">
       <button id="toggleSearchBtn" class="btn btn-sm btn-outline-primary" type="button"
               data-toggle="collapse" data-target="#searchPanel"
               aria-expanded="false" aria-controls="searchPanel">
@@ -112,12 +112,20 @@
       </button>
 
       <span class="ml-2 small muted">
-        {% if sorce %}
-          検索結果: <strong>{{ sorce | length }}</strong> 件
-        {% else %}
-          検索結果: 0 件
-        {% endif %}
+        検索結果: <strong>{{ sorce | length }}</strong> 件
       </span>
+
+      {% if share_sid and sorce and (sorce | length) > 0 %}
+        <a class="btn btn-sm btn-success ml-2"
+           href="/share_image?sid={{ share_sid }}&n=12&cols=3&w=1600"
+           target="_blank" rel="noopener noreferrer">
+          X用まとめ画像（表示）
+        </a>
+        <a class="btn btn-sm btn-outline-success ml-1"
+           href="/share_image?sid={{ share_sid }}&n=12&cols=3&w=1600&download=1">
+          PNG保存
+        </a>
+      {% endif %}
     </div>
   </div>
 
