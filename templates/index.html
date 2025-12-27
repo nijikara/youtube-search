@@ -1,440 +1,476 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ title }}</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
         integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
         crossorigin="anonymous">
 
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
 
   <style>
-    body { background: #fafafa; }
-    .sticky-wrap { position: sticky; top: 0; z-index: 999; background: #fafafa; padding-top: .5rem; }
-    .card { border-radius: 14px; }
-    .form-row-gap > * { margin-right: .5rem; margin-bottom: .5rem; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    body { font-family: 'Noto Sans JP', system-ui, -apple-system, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif; }
+
+    /* --- sticky search --- */
+    #search-sticky {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: #fff;
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .small-muted { color:#666; font-size: 12px; }
     .nowrap { white-space: nowrap; }
-    .text-content { max-height: 110px; overflow-y: auto; }
-    .table td { max-width: 420px; vertical-align: top; }
-    .kind-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eee; }
-    .kind-badge.shorts { background:#e8f1ff; color:#0b5bd3; }
-    .kind-badge.normal { background:#e9fbe9; color:#1b7f2a; }
+    .text-content {
+      max-height: 6.5em;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
 
-    /* grid buttons */
-    .grid-btn { margin: 2px; }
-    .grid-btn.active { box-shadow: 0 0 0 3px rgba(0,123,255,.25); }
-    .share-box { background: #fff; border: 1px solid #e9e9e9; border-radius: 14px; padding: 12px; }
-    .share-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-    .hint { color:#666; font-size: 12px; }
+    #fav-table-normal th, #fav-table-shorts th { background-color: #ffe0ef; }
 
-    details summary { cursor:pointer; }
-    .divider { height:1px; background:#e9e9e9; margin: 12px 0; }
+    .thumb-img { height: 72px; width: auto; border-radius: 6px; }
+    .icon-img { height: 32px; width: 32px; border-radius: 50%; }
+
+    .btn-grid.active { border-width: 2px; }
+
+    .xshare-card {
+      border: 1px solid rgba(0,0,0,.1);
+      border-radius: 10px;
+      padding: 12px;
+      background: #fafafa;
+    }
+
+    .xshare-controls input[type="number"] { width: 110px; }
+    .xshare-controls .form-check { margin-right: 12px; }
+
+    .tight-gap { gap: 6px; }
   </style>
 
-  <script>
-    function divisors(n){
-      n = parseInt(n,10);
-      if(!n || n<=0) return [];
-      const out = [];
-      for(let a=1; a*a<=n; a++){
-        if(n%a===0){
-          out.push([a, n/a]);
-          if(a!==n/a) out.push([n/a, a]);
-        }
-      }
-      // sort by rows asc then cols asc
-      out.sort((p,q)=> (p[0]-q[0]) || (p[1]-q[1]));
-      return out;
-    }
-
-    function setActiveBtn(container, btn){
-      $(container).find('.grid-btn').removeClass('active');
-      $(btn).addClass('active');
-    }
-
-    function renderGrid(kind){
-      const sid = $('#share_sid').val();
-      if(!sid) return;
-
-      const total = parseInt($('#count_'+kind).val() || '0', 10);
-      const n = parseInt($('#share_n_'+kind).val() || total, 10) || total;
-      const baseN = Math.min(n, total);
-
-      const rowsInput = $('#grid_rows_'+kind);
-      const colsInput = $('#grid_cols_'+kind);
-      const rows = parseInt(rowsInput.val() || '0',10);
-      const cols = parseInt(colsInput.val() || '0',10);
-
-      const wrap = $('#grid_btns_'+kind);
-      wrap.empty();
-
-      const pairs = divisors(baseN);
-      if(pairs.length === 0){
-        wrap.append('<span class="hint">（件数が0です）</span>');
-        return;
-      }
-
-      // 推奨: できるだけ 16:9 に近い (cols/rows) を選ぶ（雑）
-      let best = null;
-      let bestScore = 1e9;
-      const target = (kind==='shorts') ? (9/16) : (16/9); // 画像全体は cols/rows がこれに近いほど横長/縦長の感覚が合う
-      pairs.forEach(([r,c])=>{
-        const ratio = c / r;
-        const score = Math.abs(Math.log(ratio/target));
-        if(score < bestScore){
-          bestScore = score;
-          best = [r,c];
-        }
-      });
-
-      pairs.forEach(([r,c])=>{
-        const btn = $('<button type="button" class="btn btn-sm btn-outline-primary grid-btn"></button>');
-        btn.text(`${r}×${c}`);
-        btn.on('click', ()=>{
-          rowsInput.val(r);
-          colsInput.val(c);
-          setActiveBtn(wrap, btn);
-        });
-        wrap.append(btn);
-        // 初期選択が無いなら推奨を active
-        if((!rows || !cols) && best && best[0]===r && best[1]===c){
-          btn.addClass('active');
-          rowsInput.val(r);
-          colsInput.val(c);
-        }
-        if(rows===r && cols===c){
-          btn.addClass('active');
-        }
-      });
-
-      $('#grid_hint_'+kind).text(`約数候補: ${baseN}件（推奨: ${best[0]}×${best[1]}）`);
-    }
-
-    function buildShareUrl(kind){
-      const sid = $('#share_sid').val();
-      const total = parseInt($('#count_'+kind).val() || '0', 10);
-      const n = parseInt($('#share_n_'+kind).val() || total, 10) || total;
-      const rows = parseInt($('#grid_rows_'+kind).val() || '0', 10);
-      const cols = parseInt($('#grid_cols_'+kind).val() || '0', 10);
-
-      const showTitle = $('#show_title').is(':checked') ? '1' : '0';
-      const showChannel = $('#show_channel').is(':checked') ? '1' : '0';
-      const pad = $('#pad').val() || '8';
-      const thumbW = ($('#thumb_w').val() || '').trim();
-
-      const qs = new URLSearchParams();
-      qs.set('sid', sid);
-      qs.set('kind', kind);
-      if(rows>0) qs.set('rows', rows);
-      if(cols>0) qs.set('cols', cols);
-      qs.set('n', Math.min(n, total).toString());
-      qs.set('pad', pad);
-      if(thumbW) qs.set('thumb_w', thumbW);
-      qs.set('show_title', showTitle);
-      qs.set('show_channel', showChannel);
-
-      return '/share_image?' + qs.toString();
-    }
-
-    $(function(){
-      $('#fav-table-normal').tablesorter();
-      $('#fav-table-shorts').tablesorter();
-
-      // フォーム開閉 → フォーム位置へスクロール
-      $('#toggleForm').on('click', function(){
-        const d = document.getElementById('searchFormDetails');
-        d.open = !d.open;
-        document.getElementById('searchTop').scrollIntoView({behavior:'smooth', block:'start'});
-      });
-
-      // グリッド候補を描画
-      renderGrid('normal');
-      renderGrid('shorts');
-
-      $('#share_n_normal, #grid_rows_normal, #grid_cols_normal').on('input', ()=>renderGrid('normal'));
-      $('#share_n_shorts, #grid_rows_shorts, #grid_cols_shorts').on('input', ()=>renderGrid('shorts'));
-
-      $('#shareNormal').on('click', function(){
-        window.open(buildShareUrl('normal'), '_blank');
-      });
-      $('#shareShorts').on('click', function(){
-        window.open(buildShareUrl('shorts'), '_blank');
-      });
-    });
-  </script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
 </head>
 
 <body>
-  <div id="searchTop" class="sticky-wrap">
-    <div class="container">
-      <div class="d-flex justify-content-between align-items-center">
-        <h4 class="mb-2">YouTube検索</h4>
-        <button id="toggleForm" class="btn btn-sm btn-outline-secondary">検索フォーム開閉</button>
+<div class="container-fluid" id="page-top">
+
+  <div id="search-sticky" class="py-2">
+    <div class="d-flex align-items-center justify-content-between px-2">
+      <div class="h5 m-0">search_youtube</div>
+      <div>
+        <button id="toggle-search" class="btn btn-sm btn-outline-primary">検索フォーム</button>
+        <a class="btn btn-sm btn-outline-secondary" href="#xshare">X用まとめ画像</a>
       </div>
+    </div>
 
-      <details id="searchFormDetails" open>
-        <summary class="hint mb-2">ここをクリックでも開閉できます</summary>
+    <div id="search-panel" class="mt-2 px-2" style="display:block;">
+      <!-- コメント表示（URL/IDから） -->
+      <form method="GET" action="/comment" target="_blank" class="form-inline mb-2">
+        <label class="mr-2">動画URL/ID</label>
+        <input type="text" class="form-control form-control-sm mr-2" name="video-id" style="min-width: 320px" placeholder="https://www.youtube.com/watch?v=... / 11桁ID">
+        <button type="submit" class="btn btn-sm btn-secondary">コメント表示</button>
+        <span class="small-muted ml-2">※ 検索結果のコメント数クリックでも開けます</span>
+      </form>
 
-        <div class="card mb-3">
-          <div class="card-body">
-            <form method="GET" action="/scraping">
-              <div class="form-row-gap d-flex flex-wrap align-items-end">
-                <div>
-                  <label class="mb-1">検索ワード</label>
-                  <input type="text" class="form-control" name="word" value="{{ form.word }}" style="min-width: 240px;">
-                </div>
+      <!-- 検索フォーム -->
+      <form method="GET" action="/scraping" class="border rounded p-2">
+        <div class="form-row align-items-end">
+          <div class="col-md-3 mb-2">
+            <label class="small-muted">検索ワード</label>
+            <input type="text" class="form-control form-control-sm" name="word" value="{{ form.word }}">
+          </div>
 
-                <div>
-                  <label class="mb-1">From</label>
-                  <input type="date" class="form-control" name="from" value="{{ form.from }}">
-                </div>
-                <div>
-                  <label class="mb-1">To</label>
-                  <input type="date" class="form-control" name="to" value="{{ form.to }}">
-                </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">From</label>
+            <input type="date" class="form-control form-control-sm" name="from" value="{{ form.from }}">
+          </div>
 
-                <div>
-                  <label class="mb-1">チャンネルID/URL</label>
-                  <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id }}" style="min-width: 320px;">
-                </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">To</label>
+            <input type="date" class="form-control form-control-sm" name="to" value="{{ form.to }}">
+          </div>
 
-                <div>
-                  <label class="mb-1">検索対象</label>
-                  <select class="form-control" name="kind">
-                    <option value="" {% if form.kind=='' %}selected{% endif %}>（両方）</option>
-                    <option value="normal" {% if form.kind=='normal' %}selected{% endif %}>通常動画のみ</option>
-                    <option value="shorts" {% if form.kind=='shorts' %}selected{% endif %}>ショートのみ</option>
-                  </select>
-                </div>
+          <div class="col-md-3 mb-2">
+            <label class="small-muted">チャンネルURL/ID（任意）</label>
+            <input type="text" class="form-control form-control-sm" name="channel-id" value="{{ form.channel_id }}" placeholder="https://www.youtube.com/@...">
+          </div>
 
-                <div>
-                  <label class="mb-1">取得件数</label>
-                  <input type="number" class="form-control" name="video-count" value="{{ form.video_count }}" min="1" max="2000" style="width:120px;">
-                </div>
-
-                <div>
-                  <label class="mb-1">並び</label>
-                  <select class="form-control" name="order">
-                    <option value="date" {% if form.order=='date' %}selected{% endif %}>新しい順</option>
-                    <option value="viewCount" {% if form.order=='viewCount' %}selected{% endif %}>再生数</option>
-                    <option value="rating" {% if form.order=='rating' %}selected{% endif %}>高評価</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="form-row-gap d-flex flex-wrap align-items-end">
-                <div>
-                  <label class="mb-1">再生数 下限</label>
-                  <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min }}" style="width:140px;">
-                </div>
-                <div>
-                  <label class="mb-1">再生数 上限</label>
-                  <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max }}" style="width:140px;">
-                </div>
-                <div>
-                  <label class="mb-1">登録者 下限</label>
-                  <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min }}" style="width:140px;">
-                </div>
-                <div>
-                  <label class="mb-1">登録者 上限</label>
-                  <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max }}" style="width:140px;">
-                </div>
-
-                <button type="submit" class="btn btn-primary">検索</button>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="form-row-gap d-flex flex-wrap align-items-end">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="show_title" {% if form.show_title=='1' %}checked{% endif %}>
-                  <label class="form-check-label" for="show_title">画像出力でタイトル表示</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="show_channel" {% if form.show_channel=='1' %}checked{% endif %}>
-                  <label class="form-check-label" for="show_channel">画像出力でチャンネル名表示</label>
-                </div>
-
-                <div>
-                  <label class="mb-1">画像間隔</label>
-                  <input id="pad" type="number" class="form-control" value="{{ form.pad }}" style="width:110px;">
-                </div>
-                <div>
-                  <label class="mb-1">サムネ幅（空=デフォ）</label>
-                  <input id="thumb_w" type="number" class="form-control" value="{{ form.thumb_w }}" style="width:160px;" placeholder="例: 480">
-                </div>
-                <div class="hint">※ 出力ボタン側の「n / rows×cols」で件数をキリよく調整できます</div>
-              </div>
-
-              <input type="hidden" id="share_sid" value="{{ share_sid }}">
-            </form>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">並び順</label>
+            <select class="form-control form-control-sm" name="order">
+              <option value="date" {% if form.order=='date' %}selected{% endif %}>新しい順</option>
+              <option value="relevance" {% if form.order=='relevance' %}selected{% endif %}>関連度</option>
+              <option value="viewcount" {% if form.order=='viewcount' %}selected{% endif %}>再生数</option>
+            </select>
           </div>
         </div>
-      </details>
+
+        <div class="form-row align-items-end">
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">再生数Min</label>
+            <input type="number" class="form-control form-control-sm" name="viewcount-level" value="{{ form.viewcount_min }}" placeholder="0">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">再生数Max</label>
+            <input type="number" class="form-control form-control-sm" name="viewcount-max" value="{{ form.viewcount_max }}" placeholder="空=上限なし">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">登録者Min</label>
+            <input type="number" class="form-control form-control-sm" name="subscribercount-level" value="{{ form.sub_min }}" placeholder="0">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">登録者Max</label>
+            <input type="number" class="form-control form-control-sm" name="subscribercount-max" value="{{ form.sub_max }}" placeholder="空=上限なし">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">取得件数</label>
+            <input type="number" class="form-control form-control-sm" name="video-count" value="{{ form.video_count }}">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small-muted">対象</label>
+            <select class="form-control form-control-sm" name="kind">
+              <option value="" {% if form.kind=='' %}selected{% endif %}>両方</option>
+              <option value="normal" {% if form.kind=='normal' %}selected{% endif %}>通常</option>
+              <option value="shorts" {% if form.kind=='shorts' %}selected{% endif %}>ショート</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center justify-content-between">
+          <button type="submit" class="btn btn-sm btn-primary">検索</button>
+          <div class="small-muted">
+            {% if quota %}
+              推定クォータ: {{ quota.used_estimate }}/{{ quota.daily_quota }} / リセット: {{ quota.reset_at_jst }}
+            {% endif %}
+          </div>
+        </div>
+      </form>
     </div>
   </div>
 
-  <div class="container pb-5">
+  <div class="mt-3 px-2">
     {% if error %}
       <div class="alert alert-danger">{{ error }}</div>
     {% endif %}
 
-    {% if total_rows == 0 %}
-      <div class="hint">検索条件を入れて「検索」を押してください。</div>
-    {% else %}
-      <div class="mb-2">
-        <span class="badge badge-secondary">合計 {{ total_rows }} 件</span>
-        <span class="badge badge-success">通常 {{ normal_rows|length }} 件</span>
-        <span class="badge badge-info">ショート {{ short_rows|length }} 件</span>
+    <div class="d-flex align-items-center justify-content-between">
+      <div>
+        <div class="h6 m-0">検索結果</div>
+        <div class="small-muted">通常: {{ normal_rows|length }} / ショート: {{ short_rows|length }} / 合計: {{ (normal_rows|length + short_rows|length) }}</div>
+      </div>
+      <a href="#page-top" class="btn btn-sm btn-outline-secondary">ページ上へ</a>
+    </div>
+
+    <!-- X share section -->
+    <div id="xshare" class="xshare-card mt-3" data-share-sid="{{ share_sid }}" data-normal-count="{{ normal_rows|length }}" data-shorts-count="{{ short_rows|length }}">
+      <div class="d-flex align-items-center justify-content-between">
+        <div class="h6 m-0">X用まとめ画像（検索結果から生成）</div>
+        <span class="small-muted">※ 画像は新規タブで表示（右クリック保存）</span>
       </div>
 
-      <div class="share-box mb-3">
-        <div class="share-actions">
-          <div class="hint">X用まとめ画像：</div>
-
-          <input type="hidden" id="count_normal" value="{{ normal_rows|length }}">
-          <input type="hidden" id="count_shorts" value="{{ short_rows|length }}">
-
-          <button id="shareNormal" type="button" class="btn btn-sm btn-outline-success" {% if normal_rows|length==0 %}disabled{% endif %}>通常だけ出力</button>
-          <button id="shareShorts" type="button" class="btn btn-sm btn-outline-info" {% if short_rows|length==0 %}disabled{% endif %}>ショートだけ出力（黒ベタ除去）</button>
-
-          <span class="hint">（別タブでPNGを開きます）</span>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="row">
-          <div class="col-md-6">
-            <div class="d-flex align-items-center justify-content-between">
-              <div class="font-weight-bold">通常：グリッド設定</div>
-              <div class="hint" id="grid_hint_normal"></div>
+      <div class="row mt-2">
+        <!-- normal -->
+        <div class="col-lg-6 mb-3">
+          <div class="font-weight-bold">通常動画（{{ normal_rows|length }}件）</div>
+          <div class="xshare-controls d-flex flex-wrap align-items-center tight-gap mt-2">
+            <div class="form-inline">
+              <label class="mr-1">件数N</label>
+              <input id="n-normal" type="number" class="form-control form-control-sm" min="1" value="{{ share_default_n_normal }}">
             </div>
-            <div class="form-row-gap d-flex flex-wrap align-items-end mt-2">
-              <div>
-                <label class="mb-1">n（上位から）</label>
-                <input id="share_n_normal" type="number" class="form-control" value="{{ form.share_n }}" placeholder="空=全件" style="width:140px;">
-              </div>
-              <div>
-                <label class="mb-1">rows</label>
-                <input id="grid_rows_normal" type="number" class="form-control" value="" style="width:110px;">
-              </div>
-              <div>
-                <label class="mb-1">cols</label>
-                <input id="grid_cols_normal" type="number" class="form-control" value="" style="width:110px;">
-              </div>
+            <div class="form-inline">
+              <label class="mr-1">サムネ幅</label>
+              <input id="tw-normal" type="number" class="form-control form-control-sm" min="120" value="480">
             </div>
-            <div id="grid_btns_normal" class="mt-2"></div>
+            <div class="form-inline">
+              <label class="mr-1">間隔</label>
+              <input id="pad-normal" type="number" class="form-control form-control-sm" min="0" value="6">
+            </div>
+            <div class="form-check form-check-inline">
+              <input id="show-title" class="form-check-input" type="checkbox" checked>
+              <label class="form-check-label" for="show-title">タイトル</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input id="show-channel" class="form-check-input" type="checkbox" checked>
+              <label class="form-check-label" for="show-channel">チャンネル名</label>
+            </div>
           </div>
 
-          <div class="col-md-6">
-            <div class="d-flex align-items-center justify-content-between">
-              <div class="font-weight-bold">ショート：グリッド設定</div>
-              <div class="hint" id="grid_hint_shorts"></div>
+          <div class="mt-2">
+            <div class="small-muted">グリッド候補（Nの約数）</div>
+            <div id="grid-normal" class="d-flex flex-wrap tight-gap mt-1"></div>
+            <input id="rows-normal" type="hidden" value="1">
+            <input id="cols-normal" type="hidden" value="1">
+          </div>
+
+          <div class="mt-2">
+            <a id="open-normal" class="btn btn-sm btn-success" target="_blank" rel="noopener">通常まとめ画像を開く</a>
+          </div>
+        </div>
+
+        <!-- shorts -->
+        <div class="col-lg-6 mb-3">
+          <div class="font-weight-bold">ショート（{{ short_rows|length }}件）</div>
+          <div class="xshare-controls d-flex flex-wrap align-items-center tight-gap mt-2">
+            <div class="form-inline">
+              <label class="mr-1">件数N</label>
+              <input id="n-shorts" type="number" class="form-control form-control-sm" min="1" value="{{ share_default_n_shorts }}">
             </div>
-            <div class="form-row-gap d-flex flex-wrap align-items-end mt-2">
-              <div>
-                <label class="mb-1">n（上位から）</label>
-                <input id="share_n_shorts" type="number" class="form-control" value="{{ form.share_n }}" placeholder="空=全件" style="width:140px;">
-              </div>
-              <div>
-                <label class="mb-1">rows</label>
-                <input id="grid_rows_shorts" type="number" class="form-control" value="" style="width:110px;">
-              </div>
-              <div>
-                <label class="mb-1">cols</label>
-                <input id="grid_cols_shorts" type="number" class="form-control" value="" style="width:110px;">
-              </div>
+            <div class="form-inline">
+              <label class="mr-1">サムネ幅</label>
+              <input id="tw-shorts" type="number" class="form-control form-control-sm" min="120" value="360">
             </div>
-            <div id="grid_btns_shorts" class="mt-2"></div>
+            <div class="form-inline">
+              <label class="mr-1">間隔</label>
+              <input id="pad-shorts" type="number" class="form-control form-control-sm" min="0" value="6">
+            </div>
+            <div class="small-muted">※ ショートは左右の黒ベタ除去→縦長レイアウト</div>
+          </div>
+
+          <div class="mt-2">
+            <div class="small-muted">グリッド候補（Nの約数）</div>
+            <div id="grid-shorts" class="d-flex flex-wrap tight-gap mt-1"></div>
+            <input id="rows-shorts" type="hidden" value="1">
+            <input id="cols-shorts" type="hidden" value="1">
+          </div>
+
+          <div class="mt-2">
+            <a id="open-shorts" class="btn btn-sm btn-success" target="_blank" rel="noopener">ショートまとめ画像を開く</a>
           </div>
         </div>
       </div>
+    </div>
 
-      {% macro results_table(rows, table_id, kind_label, badge_class) %}
-        <div class="card mb-4">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <div>
-              <span class="badge {{ badge_class }}">{{ kind_label }}</span>
-              <span class="hint ml-2">{{ rows|length }}件</span>
-            </div>
-          </div>
-          <div class="card-body p-2">
-            <table id="{{ table_id }}" class="table table-bordered table-sm tablesorter mb-0">
-              <thead class="thead-light">
-                <tr>
-                  <th class="nowrap">投稿日時</th>
-                  <th>タイトル</th>
-                  <th>概要</th>
-                  <th class="nowrap">再生数</th>
-                  <th class="nowrap">高評価</th>
-                  <th class="nowrap">コメント</th>
-                  <th class="nowrap">時間</th>
-                  <th class="nowrap">サムネ</th>
-                  <th class="nowrap">URL</th>
-                  <th class="nowrap">チャンネル</th>
-                  <th class="nowrap">登録者</th>
-                  <th class="nowrap">チャンネルURL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in rows %}
-                  {% set view = (row.get('viewCount') or 0) %}
-                  {% set like = (row.get('likeCount') or 0) %}
-                  {% set comm = (row.get('commentCount') or 0) %}
-                  {% set sub = (row.get('subscriberCount') or 0) %}
-                  <tr>
-                    <td class="nowrap" data-sort-value="{{ row.get('publishedAt','') }}">{{ row.get('publishedAt','') }}</td>
-                    <td><div class="text-content">{{ row.get('title','') }}</div></td>
-                    <td><div class="text-content">{{ row.get('description','') }}</div></td>
+    {% macro result_table(table_id, rows) -%}
+      <table id="{{ table_id }}" class="table table-bordered table-sm tablesorter">
+        <thead>
+          <tr>
+            <th class="nowrap">投稿日時</th>
+            <th>タイトル</th>
+            <th>概要</th>
+            <th class="nowrap">再生数</th>
+            <th class="nowrap">高評価</th>
+            <th class="nowrap">コメント</th>
+            <th class="nowrap">動画時間</th>
+            <th class="nowrap">サムネ</th>
+            <th class="nowrap">URL</th>
+            <th class="nowrap">チャンネル</th>
+            <th class="nowrap">登録者</th>
+            <th class="nowrap">アイコン</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td class="nowrap" data-sort-value="{{ row.get('publishedAt','') }}"><div class="text-content">{{ row.get('publishedAt','') }}</div></td>
+            <td data-sort-value="{{ row.get('title','') }}"><div class="text-content">{{ row.get('title','') }}</div></td>
+            <td><div class="text-content">{{ row.get('description','') }}</div></td>
 
-                    <td class="nowrap" data-sort-value="{{ view|int }}">{{ "{:,}".format(view|int) }}</td>
-                    <td class="nowrap" data-sort-value="{{ like|int }}">{{ "{:,}".format(like|int) }}</td>
-                    <td class="nowrap" data-sort-value="{{ comm|int }}">
-                      <a href="/comment?video-id={{ row.get('video_url','') }}" target="_blank">{{ "{:,}".format(comm|int) }}</a>
-                    </td>
+            <td class="text-right" data-sort-value="{{ row.get('viewCount') or 0 }}">{{ "{:,}".format((row.get('viewCount') or 0)|int) }}</td>
+            <td class="text-right" data-sort-value="{{ row.get('likeCount') or 0 }}">{{ "{:,}".format((row.get('likeCount') or 0)|int) }}</td>
 
-                    <td class="nowrap">{{ row.get('videoDuration','') }}</td>
+            <td class="text-right" data-sort-value="{{ row.get('commentCount') or 0 }}">
+              <a href="/comment?video-id={{ row.get('video_url','') }}" target="_blank" rel="noopener">{{ "{:,}".format((row.get('commentCount') or 0)|int) }}</a>
+            </td>
 
-                    <td class="nowrap">
-                      {% if row.get('thumbnails') %}
-                        <a href="{{ row.get('video_url','') }}" target="_blank">
-                          <img src="{{ row.get('thumbnails') }}" height="72">
-                        </a>
-                      {% endif %}
-                    </td>
+            <td class="nowrap" data-sort-value="{{ row.get('videoDuration','') }}">{{ row.get('videoDuration','') }}</td>
 
-                    <td class="nowrap"><a href="{{ row.get('video_url','') }}" target="_blank">open</a></td>
-                    <td class="nowrap"><div class="text-content">{{ row.get('name','') }}</div></td>
-                    <td class="nowrap" data-sort-value="{{ sub|int }}">{{ "{:,}".format(sub|int) }}</td>
+            <td class="nowrap">
+              {% if row.get('thumbnails') %}
+                <a href="{{ row.get('thumbnails') }}" target="_blank" rel="noopener"><img class="thumb-img" src="{{ row.get('thumbnails') }}"></a>
+              {% endif %}
+            </td>
 
-                    <td class="nowrap">
-                      {% if row.get('channel_icon') and row.get('channel_icon')|length >= 1 %}
-                        <a href="{{ row.get('channel_icon')[0] }}" target="_blank">open</a>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      {% endmacro %}
+            <td class="nowrap">
+              {% if row.get('video_url') %}
+                <a href="{{ row.get('video_url') }}" target="_blank" rel="noopener">開く</a>
+              {% endif %}
+            </td>
 
-      {% if normal_rows|length > 0 %}
-        {{ results_table(normal_rows, "fav-table-normal", "通常動画", "badge-success") }}
-      {% endif %}
-      {% if short_rows|length > 0 %}
-        {{ results_table(short_rows, "fav-table-shorts", "ショート", "badge-info") }}
-      {% endif %}
+            <td class="nowrap"><div class="text-content">{{ row.get('name','') }}</div></td>
+
+            <td class="text-right" data-sort-value="{{ row.get('subscriberCount') or 0 }}">{{ "{:,}".format((row.get('subscriberCount') or 0)|int) }}</td>
+
+            <td class="nowrap">
+              {% set ci = row.get('channel_icon') %}
+              {% if ci and ci|length >= 2 %}
+                <a href="{{ ci[0] }}" target="_blank" rel="noopener"><img class="icon-img" src="{{ ci[1] }}"></a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {%- endmacro %}
+
+    {% if normal_rows|length > 0 %}
+      <div class="mt-3">
+        <div class="h6">通常動画</div>
+        {{ result_table('fav-table-normal', normal_rows) }}
+      </div>
     {% endif %}
+
+    {% if short_rows|length > 0 %}
+      <div class="mt-4">
+        <div class="h6">ショート</div>
+        {{ result_table('fav-table-shorts', short_rows) }}
+      </div>
+    {% endif %}
+
   </div>
+</div>
+
+<script>
+(function() {
+  // --- tablesorter ---
+  $(function() {
+    $('#fav-table-normal').tablesorter();
+    $('#fav-table-shorts').tablesorter();
+  });
+
+  // --- search panel toggle + scroll ---
+  const btn = document.getElementById('toggle-search');
+  const panel = document.getElementById('search-panel');
+  btn.addEventListener('click', () => {
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    btn.textContent = isOpen ? '検索フォーム' : '検索フォーム（閉じる）';
+    if (!isOpen) {
+      // 開いたらそこへスクロール
+      document.getElementById('search-sticky').scrollIntoView({behavior:'smooth', block:'start'});
+    }
+  });
+
+  // --- X share build ---
+  const xroot = document.getElementById('xshare');
+  const sid = xroot.dataset.shareSid || '';
+
+  function factors(n) {
+    const out = [];
+    n = Math.max(1, n|0);
+    for (let i=1; i*i<=n; i++) {
+      if (n % i === 0) {
+        out.push([i, n/i]);
+      }
+    }
+    // 低い段数→高い段数
+    return out;
+  }
+
+  function setActive(container, rows, cols) {
+    [...container.querySelectorAll('button')].forEach(b => {
+      const r = parseInt(b.dataset.rows||'0',10);
+      const c = parseInt(b.dataset.cols||'0',10);
+      if (r === rows && c === cols) {
+        b.classList.add('active');
+        b.classList.remove('btn-outline-secondary');
+        b.classList.add('btn-primary');
+      } else {
+        b.classList.remove('active');
+        b.classList.add('btn-outline-secondary');
+        b.classList.remove('btn-primary');
+      }
+    });
+  }
+
+  function buildGrid(kind) {
+    const count = parseInt(xroot.dataset[kind + 'Count'] || '0', 10);
+    const nInput = document.getElementById('n-' + kind);
+    const n = Math.min(Math.max(parseInt(nInput.value || '1', 10), 1), Math.max(count, 1));
+    nInput.value = n;
+
+    const grid = document.getElementById('grid-' + kind);
+    grid.innerHTML = '';
+
+    const pairs = factors(n);
+    // cols x rows 表記で並べたいので、(rows, cols) を作る
+    // pairsは [small, large] なので rows=small, cols=large を基本
+    pairs.forEach(([r, c]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-sm btn-outline-secondary btn-grid';
+      b.dataset.rows = String(r);
+      b.dataset.cols = String(c);
+      b.textContent = `${c}×${r}`; // cols×rows
+      b.addEventListener('click', () => {
+        document.getElementById('rows-' + kind).value = String(r);
+        document.getElementById('cols-' + kind).value = String(c);
+        setActive(grid, r, c);
+        refreshLinks();
+      });
+      grid.appendChild(b);
+    });
+
+    // デフォルトは “なるべく正方形”
+    let best = pairs[0];
+    let bestScore = Infinity;
+    pairs.forEach(([r, c]) => {
+      const score = Math.abs((c / r) - 1);
+      if (score < bestScore) { bestScore = score; best = [r, c]; }
+    });
+
+    const [dr, dc] = best;
+    document.getElementById('rows-' + kind).value = String(dr);
+    document.getElementById('cols-' + kind).value = String(dc);
+    setActive(grid, dr, dc);
+  }
+
+  function refreshLinks() {
+    if (!sid) return;
+
+    const showTitle = document.getElementById('show-title').checked ? '1' : '0';
+    const showChannel = document.getElementById('show-channel').checked ? '1' : '0';
+
+    // normal
+    {
+      const kind = 'normal';
+      const n = document.getElementById('n-normal').value;
+      const rows = document.getElementById('rows-normal').value;
+      const cols = document.getElementById('cols-normal').value;
+      const tw = document.getElementById('tw-normal').value;
+      const pad = document.getElementById('pad-normal').value;
+
+      const qs = new URLSearchParams({sid, kind, n, rows, cols, thumb_w: tw, pad, show_title: showTitle, show_channel: showChannel});
+      document.getElementById('open-normal').href = '/share_image?' + qs.toString();
+    }
+
+    // shorts
+    {
+      const kind = 'shorts';
+      const n = document.getElementById('n-shorts').value;
+      const rows = document.getElementById('rows-shorts').value;
+      const cols = document.getElementById('cols-shorts').value;
+      const tw = document.getElementById('tw-shorts').value;
+      const pad = document.getElementById('pad-shorts').value;
+
+      const qs = new URLSearchParams({sid, kind, n, rows, cols, thumb_w: tw, pad, show_title: showTitle, show_channel: showChannel});
+      document.getElementById('open-shorts').href = '/share_image?' + qs.toString();
+    }
+  }
+
+  // init
+  buildGrid('normal');
+  buildGrid('shorts');
+  refreshLinks();
+
+  // bind
+  ['n-normal','tw-normal','pad-normal','n-shorts','tw-shorts','pad-shorts','show-title','show-channel'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      if (id.startsWith('n-')) {
+        buildGrid(id.includes('shorts') ? 'shorts' : 'normal');
+      }
+      refreshLinks();
+    });
+  });
+})();
+</script>
 </body>
 </html>

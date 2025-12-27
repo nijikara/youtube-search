@@ -1,24 +1,23 @@
-# app.py
 import os
 import re
 import time
-import math
 import uuid
+import math
+import io
 import asyncio
 import urllib.parse
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
-from quart import Quart, request, render_template, Response, send_file
+from quart import Quart, request, render_template, Response
 
 import search_youtube
 
-# ---------------------------
-# App / Env
-# ---------------------------
-app = Quart(__name__)
+# 画像出力（X用まとめ画像）
+from PIL import Image, ImageDraw, ImageFont
 
-# Jinja: コメント本文の先頭/末尾の無駄な改行を HTML 側で増やさないため
+app = Quart(__name__)
 app.jinja_env.trim_blocks = True
 app.jinja_env.lstrip_blocks = True
 
@@ -30,31 +29,83 @@ if YT_BASE_URL and not YT_BASE_URL.endswith("/"):
 JST = timezone(timedelta(hours=9))
 
 # ---------------------------
-# Simple caches
+# Cache (search result)
 # ---------------------------
-SEARCH_CACHE: dict = {}  # key -> (ts, rows, form, normal_rows, short_rows)
-SEARCH_TTL_SEC = 600
+CACHE: Dict[Tuple[Any, ...], Tuple[float, Any]] = {}
+CACHE_TTL_SEC = 600  # 10分
 
-SHARE_CACHE: dict = {}   # sid -> (ts, {"normal":items, "shorts":items})
-SHARE_TTL_SEC = 1800
+# share image payload cache (sid -> {normal:[...], shorts:[...]})
+SHARE_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+SHARE_TTL_SEC = 1800  # 30分
 
-def _cache_get(cache: dict, key, ttl: int):
-    v = cache.get(key)
+
+def _now_ts() -> float:
+    return time.time()
+
+
+def cache_get(key: Tuple[Any, ...]):
+    v = CACHE.get(key)
     if not v:
         return None
-    ts = v[0]
-    if time.time() - ts > ttl:
-        cache.pop(key, None)
+    ts, data = v
+    if _now_ts() - ts > CACHE_TTL_SEC:
+        CACHE.pop(key, None)
         return None
-    return v[1:]
+    return data
 
-def _cache_set(cache: dict, key, *vals):
-    cache[key] = (time.time(), *vals)
+
+def cache_set(key: Tuple[Any, ...], data: Any):
+    CACHE[key] = (_now_ts(), data)
+
+
+def share_get(sid: str) -> Optional[Dict[str, Any]]:
+    v = SHARE_CACHE.get(sid)
+    if not v:
+        return None
+    ts, data = v
+    if _now_ts() - ts > SHARE_TTL_SEC:
+        SHARE_CACHE.pop(sid, None)
+        return None
+    return data
+
+
+def share_set(payload: Dict[str, Any]) -> str:
+    # 古いの掃除（雑）
+    for k, (ts, _d) in list(SHARE_CACHE.items()):
+        if _now_ts() - ts > SHARE_TTL_SEC:
+            SHARE_CACHE.pop(k, None)
+    sid = uuid.uuid4().hex
+    SHARE_CACHE[sid] = (_now_ts(), payload)
+    return sid
+
 
 # ---------------------------
 # Helpers
 # ---------------------------
-def extract_video_id(s: str) -> str | None:
+
+def safe_int(v: Any, default: int = 0) -> int:
+    try:
+        if v is None:
+            return default
+        if isinstance(v, bool):
+            return int(v)
+        s = str(v).strip()
+        if s == "":
+            return default
+        return int(float(s))
+    except Exception:
+        return default
+
+
+def iso_to_jst_str(iso: str) -> str:
+    try:
+        dt = datetime.fromisoformat((iso or "").replace("Z", "+00:00")).astimezone(JST)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return iso or ""
+
+
+def extract_video_id(s: str) -> Optional[str]:
     s = (s or "").strip()
     if re.fullmatch(r"[0-9A-Za-z_-]{11}", s):
         return s
@@ -86,79 +137,366 @@ def extract_video_id(s: str) -> str | None:
     m = re.search(r"([0-9A-Za-z_-]{11})", s)
     return m.group(1) if m else None
 
-def iso_to_jst_str(iso: str) -> str:
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(JST)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return iso or ""
 
-def extract_user_id(author_channel_url: str, author_name: str) -> str:
-    try:
-        if author_channel_url:
-            u = urllib.parse.urlparse(author_channel_url)
-            path = urllib.parse.unquote(u.path or "")
-            m = re.search(r"/@([^/]+)", path)
-            if m:
-                return "@" + m.group(1)
-    except Exception:
-        pass
-    return author_name or ""
-
-def trim_outer_blank_lines(s: str) -> str:
-    # コメント内の改行は残す／先頭末尾の空行だけ落とす
-    s = (s or "").replace("\r\n", "\n").replace("\r", "\n")
-    s = re.sub(r"^\s*\n+", "", s)
-    s = re.sub(r"\n+\s*$", "", s)
-    return s
-
-async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict):
-    url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
-    async with session.get(url) as resp:
-        txt = await resp.text()
-        if resp.status != 200:
-            raise RuntimeError(f"{endpoint} failed {resp.status}: {txt}")
-        try:
-            js = await resp.json()
-        except Exception:
-            raise RuntimeError(f"{endpoint} invalid json: {txt}")
-        if "error" in js:
-            raise RuntimeError(str(js["error"]))
-        return js
-
-def default_form():
+def default_form() -> Dict[str, str]:
     return {
         "word": "",
         "from": "",
         "to": "",
         "channel_id": "",
         "order": "date",
+        "kind": "",  # ''=両方, 'normal', 'shorts'
         "viewcount_min": "",
         "viewcount_max": "",
         "sub_min": "",
         "sub_max": "",
         "video_count": "200",
-        "kind": "",  # ""=両方, "normal", "shorts"
-        "show_title": "1",
-        "show_channel": "1",
-        "pad": "8",
-        "thumb_w": "",  # 空ならデフォ(通常480/ショート360)
-        "share_n": "",  # 空なら全件
+        "comment_video": "",
     }
 
-def split_kind(rows: list[dict]):
-    normal, shorts = [], []
-    for r in rows or []:
-        url = (r.get("video_url") or "")
-        if "/shorts/" in url:
-            shorts.append(r)
+
+def _row_is_shorts(row: Dict[str, Any]) -> bool:
+    url = (row.get("video_url") or "")
+    if "/shorts/" in url:
+        return True
+    # 互換用
+    if row.get("isShorts") is True:
+        return True
+    return False
+
+
+def _normalize_rows(rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            # APIエラーが紛れた場合に備える
+            if "error" in r:
+                continue
+            out.append(r)
+    return out
+
+
+async def yt_get_video_snippet(video_id: str) -> Tuple[str, str, str]:
+    """(title, thumb_url, channel_title)"""
+    if not API_KEY:
+        return "", "", ""
+    params = {"part": "snippet", "id": video_id, "key": API_KEY}
+    url = YT_BASE_URL + "videos?" + urllib.parse.urlencode(params)
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return "", "", ""
+            body = await resp.json()
+    items = body.get("items") or []
+    if not items:
+        return "", "", ""
+    sn = (items[0].get("snippet") or {})
+    title = sn.get("title") or ""
+    channel_title = sn.get("channelTitle") or ""
+    thumbs = sn.get("thumbnails") or {}
+    thumb_url = ((thumbs.get("high") or {}).get("url")) or ((thumbs.get("default") or {}).get("url")) or ""
+    return title, thumb_url, channel_title
+
+
+# ---------------------------
+# Search invoke (signature-safe)
+# ---------------------------
+
+def _call_search_youtube_kwargs() -> Dict[str, Any]:
+    """search_youtube.search_youtube の実装差分を吸収するための引数名マップ"""
+    import inspect
+
+    sig = inspect.signature(search_youtube.search_youtube)
+    names = set(sig.parameters.keys())
+
+    # 新しめ（あなたの途中版）
+    if "channel_id_input" in names:
+        return {
+            "style": "new",
+            "channel": "channel_id_input",
+            "keyword": "key_word",
+            "from": "published_from",
+            "to": "published_to",
+            "vmin": "viewcount_min",
+            "vmax": "viewcount_max",
+            "smin": "subscribercount_min",
+            "smax": "subscribercount_max",
+            "count": "video_count",
+            "order": "order",
+        }
+
+    # 旧（最初にもらったやつ）
+    return {
+        "style": "old",
+        "channel": "channel_id",
+        "keyword": "key_word",
+        "from": "published_from",
+        "to": "published_to",
+        "vmin": "viewcount_level",
+        "smin": "subscribercount_level",
+        "count": "video_count",
+        "get_comment": "is_get_comment",
+    }
+
+
+async def run_search(
+    channel_id: str,
+    word: str,
+    from_date: str,
+    to_date: str,
+    view_min: str,
+    view_max: str,
+    sub_min: str,
+    sub_max: str,
+    video_count: str,
+    order: str,
+) -> List[Dict[str, Any]]:
+    m = _call_search_youtube_kwargs()
+
+    if m["style"] == "new":
+        kwargs = {
+            m["channel"]: channel_id,
+            m["keyword"]: word,
+            m["from"]: from_date,
+            m["to"]: to_date,
+            m["vmin"]: view_min,
+            m["vmax"]: view_max,
+            m["smin"]: sub_min,
+            m["smax"]: sub_max,
+            m["count"]: video_count,
+            m["order"]: order,
+        }
+        rows = await search_youtube.search_youtube(**kwargs)
+        return _normalize_rows(rows)
+
+    # old
+    # old版は max フィルタや order なし／コメント有りは最初から取る設計だったので False固定
+    args = (
+        channel_id,
+        word,
+        from_date,
+        to_date,
+        safe_int(view_min, 0),
+        safe_int(sub_min, 0),
+        safe_int(video_count, 200),
+        False,
+    )
+    rows = await search_youtube.search_youtube(*args)
+    return _normalize_rows(rows)
+
+
+# ---------------------------
+# X image generation
+# ---------------------------
+
+def _font(size: int) -> ImageFont.FreeTypeFont:
+    # 日本語が□にならないように、同梱フォント or システムフォントを探す
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansJP-Regular.ttf"),
+        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansJP-Regular.otf"),
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                return ImageFont.truetype(p, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w: int, max_lines: int) -> List[str]:
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return []
+
+    lines: List[str] = []
+    cur = ""
+    for ch in text:
+        test = cur + ch
+        w = draw.textlength(test, font=font)
+        if w <= max_w or not cur:
+            cur = test
         else:
-            normal.append(r)
-    return normal, shorts
+            lines.append(cur)
+            cur = ch
+            if len(lines) >= max_lines:
+                break
+    if len(lines) < max_lines and cur:
+        lines.append(cur)
+
+    # 省略
+    if len(lines) == max_lines:
+        # 最終行が長ければ末尾を…
+        while lines and draw.textlength(lines[-1] + "…", font=font) > max_w and len(lines[-1]) > 1:
+            lines[-1] = lines[-1][:-1]
+        if lines:
+            lines[-1] = lines[-1] + "…"
+    return lines
+
+
+def _crop_black_sidebars(img: Image.Image) -> Image.Image:
+    """左右の黒ベタっぽい帯を雑に除去（ショートサムネ用）"""
+    try:
+        g = img.convert("L")
+        w, h = g.size
+        # 列ごとの平均輝度
+        cols = []
+        px = g.load()
+        for x in range(w):
+            s = 0
+            for y in range(0, h, max(1, h // 120)):
+                s += px[x, y]
+            cols.append(s / (h / max(1, h // 120)))
+
+        thr = 12  # ほぼ黒
+        left = 0
+        while left < w and cols[left] < thr:
+            left += 1
+        right = w - 1
+        while right >= 0 and cols[right] < thr:
+            right -= 1
+
+        # 片側だけ検出の誤爆回避
+        if left > 0 and right < w - 1 and right - left > int(w * 0.4):
+            return img.crop((left, 0, right + 1, h))
+    except Exception:
+        pass
+    return img
+
+
+def _fit_contain(img: Image.Image, box_w: int, box_h: int) -> Image.Image:
+    # アスペクト維持で収める（上下カットしない）
+    img = img.convert("RGB")
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return Image.new("RGB", (box_w, box_h), (255, 255, 255))
+    scale = min(box_w / w, box_h / h)
+    nw = max(1, int(w * scale))
+    nh = max(1, int(h * scale))
+    resized = img.resize((nw, nh), Image.LANCZOS)
+    canvas = Image.new("RGB", (box_w, box_h), (255, 255, 255))
+    canvas.paste(resized, ((box_w - nw) // 2, (box_h - nh) // 2))
+    return canvas
+
+
+async def _fetch_image_bytes(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.read()
+    except Exception:
+        return None
+
+
+async def render_share_image(
+    items: List[Dict[str, Any]],
+    cols: int,
+    rows: int,
+    n: int,
+    thumb_w: int,
+    pad: int,
+    show_title: bool,
+    show_channel: bool,
+    mode: str,  # normal | shorts
+) -> bytes:
+    items = items[: max(0, n)]
+    if not items:
+        img = Image.new("RGB", (800, 200), (255, 255, 255))
+        d = ImageDraw.Draw(img)
+        d.text((20, 80), "No items", font=_font(24), fill=(0, 0, 0))
+        b = io.BytesIO()
+        img.save(b, format="PNG")
+        return b.getvalue()
+
+    cols = max(1, cols)
+    rows = max(1, rows)
+
+    # cell layout
+    if mode == "shorts":
+        thumb_h = int(round(thumb_w * 16 / 9))
+    else:
+        thumb_h = int(round(thumb_w * 3 / 4))  # 480x360想定
+
+    caption_lines = 0
+    if show_title:
+        caption_lines += 2
+    if show_channel:
+        caption_lines += 1
+
+    title_font = _font(20)
+    chan_font = _font(18)
+    line_h = 26
+    caption_h = caption_lines * line_h + (6 if caption_lines else 0)
+
+    cell_w = thumb_w
+    cell_h = thumb_h + caption_h
+
+    out_w = pad + cols * cell_w + (cols - 1) * pad + pad
+    out_h = pad + rows * cell_h + (rows - 1) * pad + pad
+
+    canvas = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        tasks = [_fetch_image_bytes(session, it.get("thumb") or "") for it in items]
+        blobs = await asyncio.gather(*tasks)
+
+    for idx, it in enumerate(items):
+        r = idx // cols
+        c = idx % cols
+        if r >= rows:
+            break
+
+        x0 = pad + c * (cell_w + pad)
+        y0 = pad + r * (cell_h + pad)
+
+        blob = blobs[idx]
+        if blob:
+            try:
+                im = Image.open(io.BytesIO(blob))
+                if mode == "shorts":
+                    im = _crop_black_sidebars(im)
+                im = _fit_contain(im, thumb_w, thumb_h)
+            except Exception:
+                im = Image.new("RGB", (thumb_w, thumb_h), (230, 230, 230))
+        else:
+            im = Image.new("RGB", (thumb_w, thumb_h), (230, 230, 230))
+
+        canvas.paste(im, (x0, y0))
+
+        ty = y0 + thumb_h + 4
+        max_text_w = thumb_w
+
+        if show_title:
+            lines = _wrap_text(draw, it.get("title") or "", title_font, max_text_w, 2)
+            for ln in lines:
+                draw.text((x0, ty), ln, font=title_font, fill=(0, 0, 0))
+                ty += line_h
+
+        if show_channel:
+            ch = it.get("channel") or ""
+            if ch:
+                lines = _wrap_text(draw, ch, chan_font, max_text_w, 1)
+                if lines:
+                    draw.text((x0, ty), lines[0], font=chan_font, fill=(80, 80, 80))
+
+    out = io.BytesIO()
+    canvas.save(out, format="PNG")
+    return out.getvalue()
+
 
 # ---------------------------
 # Routes
 # ---------------------------
+
 @app.get("/", strict_slashes=False)
 async def home():
     return await render_template(
@@ -166,11 +504,10 @@ async def home():
         title="search_youtube",
         form=default_form(),
         normal_rows=[],
-        short_rows=[],
-        total_rows=0,
+        shorts_rows=[],
         share_sid="",
-        error="",
     )
+
 
 @app.get("/scraping", strict_slashes=False)
 async def scraping():
@@ -181,107 +518,101 @@ async def scraping():
     to_date = request.args.get("to", "")
     channel_id = request.args.get("channel-id", "")
 
-    viewcount_min = request.args.get("viewcount-level", "")
-    viewcount_max = request.args.get("viewcount-max", "")
+    view_min = request.args.get("viewcount-level", "")
+    view_max = request.args.get("viewcount-max", "")
     sub_min = request.args.get("subscribercount-level", "")
     sub_max = request.args.get("subscribercount-max", "")
     video_count = request.args.get("video-count", "200")
     order = request.args.get("order", "date")
+    kind = request.args.get("kind", "")  # '', normal, shorts
 
-    kind = (request.args.get("kind", "") or "").strip()  # "", "normal", "shorts"
-    show_title = "1" if request.args.get("show_title") in ("1", "true", "on", "yes") else ("0" if "show_title" in request.args else "1")
-    show_channel = "1" if request.args.get("show_channel") in ("1", "true", "on", "yes") else ("0" if "show_channel" in request.args else "1")
-    pad = (request.args.get("pad", "8") or "8").strip()
-    thumb_w = (request.args.get("thumb_w", "") or "").strip()
-    share_n = (request.args.get("share_n", "") or "").strip()
-
-    cache_key = (
-        word, from_date, to_date, channel_id,
-        viewcount_min, viewcount_max, sub_min, sub_max,
-        video_count, order
+    form.update(
+        {
+            "word": word,
+            "from": from_date,
+            "to": to_date,
+            "channel_id": channel_id,
+            "order": order,
+            "kind": kind,
+            "viewcount_min": view_min,
+            "viewcount_max": view_max,
+            "sub_min": sub_min,
+            "sub_max": sub_max,
+            "video_count": video_count,
+        }
     )
 
-    cached = _cache_get(SEARCH_CACHE, cache_key, SEARCH_TTL_SEC)
-    error = ""
-    if cached:
-        rows, cached_form, normal_all, shorts_all = cached[0], cached[1], cached[2], cached[3]
-    else:
-        # search_youtube.py 側の関数シグネチャ違い（昔と今）を吸収
-        try:
-            rows = await search_youtube.search_youtube(
-                channel_id_input=channel_id,
-                key_word=word,
-                published_from=from_date,
-                published_to=to_date,
-                viewcount_min=viewcount_min,
-                subscribercount_min=sub_min,
-                video_count=video_count,
-                viewcount_max=viewcount_max,
-                subscribercount_max=sub_max,
-                order=order,
-            )
-        except TypeError:
-            # 旧版: (channel_id, key_word, from, to, view_min, sub_min, video_count, is_get_comment)
-            rows = await search_youtube.search_youtube(
-                channel_id, word, from_date, to_date,
-                viewcount_min, sub_min, video_count, False
-            )
+    cache_key = (
+        word,
+        from_date,
+        to_date,
+        channel_id,
+        view_min,
+        view_max,
+        sub_min,
+        sub_max,
+        video_count,
+        order,
+    )
 
-        normal_all, shorts_all = split_kind(rows)
-        _cache_set(SEARCH_CACHE, cache_key, rows, {}, normal_all, shorts_all)
+    rows = cache_get(cache_key)
+    if rows is None:
+        rows = await run_search(
+            channel_id=channel_id,
+            word=word,
+            from_date=from_date,
+            to_date=to_date,
+            view_min=view_min,
+            view_max=view_max,
+            sub_min=sub_min,
+            sub_max=sub_max,
+            video_count=video_count,
+            order=order,
+        )
+        cache_set(cache_key, rows)
 
-    # kind で絞り込み
+    # split
+    normal_rows: List[Dict[str, Any]] = []
+    shorts_rows: List[Dict[str, Any]] = []
+    for r in _normalize_rows(rows):
+        if _row_is_shorts(r):
+            shorts_rows.append(r)
+        else:
+            normal_rows.append(r)
+
     if kind == "normal":
-        normal_rows, short_rows = normal_all, []
+        shorts_rows = []
     elif kind == "shorts":
-        normal_rows, short_rows = [], shorts_all
-    else:
-        normal_rows, short_rows = normal_all, shorts_all
+        normal_rows = []
 
-    # Share SID（画像出力用）を作る（結果がないなら空）
-    share_sid = ""
-    if (normal_rows or short_rows):
-        sid = uuid.uuid4().hex[:12]
-        items = {
-            "normal": _to_share_items(normal_rows),
-            "shorts": _to_share_items(short_rows),
+    # share payload (タイトル/チャンネル名の出力は後で選べるので、ここでは素材だけ)
+    def to_item(r: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "thumb": r.get("thumbnails") or "",
+            "title": r.get("title") or "",
+            "channel": r.get("name") or "",
         }
-        _cache_set(SHARE_CACHE, sid, items)
-        share_sid = sid
 
-    form.update({
-        "word": word,
-        "from": from_date,
-        "to": to_date,
-        "channel_id": channel_id,
-        "order": order,
-        "viewcount_min": viewcount_min,
-        "viewcount_max": viewcount_max,
-        "sub_min": sub_min,
-        "sub_max": sub_max,
-        "video_count": video_count,
-        "kind": kind,
-        "show_title": show_title,
-        "show_channel": show_channel,
-        "pad": pad,
-        "thumb_w": thumb_w,
-        "share_n": share_n,
-    })
+    payload = {
+        "normal": [to_item(r) for r in normal_rows],
+        "shorts": [to_item(r) for r in shorts_rows],
+        "meta": {
+            "createdAt": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+            "query": word,
+        },
+    }
+    share_sid = share_set(payload)
 
     return await render_template(
         "index.html",
         title="search_youtube",
         form=form,
         normal_rows=normal_rows,
-        short_rows=short_rows,
-        total_rows=(len(normal_rows) + len(short_rows)),
+        shorts_rows=shorts_rows,
         share_sid=share_sid,
-        error=error,
     )
 
-# ---------------------------
-# Comment viewer (sortable table)
-# ---------------------------
+
 @app.get("/comment", strict_slashes=False)
 async def comment():
     raw = request.args.get("video-id", "")
@@ -289,115 +620,135 @@ async def comment():
     if not video_id:
         return Response("invalid video-id", status=400)
 
-    mode = (request.args.get("mode", "threads") or "threads").strip()  # "threads" or "replies"
+    mode = (request.args.get("mode", "threads") or "threads").strip()
     parent_id = (request.args.get("parent-id", "") or "").strip()
     page_token = (request.args.get("pageToken", "") or "").strip()
 
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # 1) 動画情報（タイトル＆サムネ）
-    video_title = ""
-    video_thumb = ""
-    channel_title = ""
-    timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
-            params = {"part": "snippet", "id": video_id, "key": API_KEY}
-            body = await yt_get_json(session, "videos", params)
-            items = body.get("items") or []
-            if items:
-                sn = (items[0].get("snippet") or {})
-                video_title = sn.get("title", "") or ""
-                channel_title = sn.get("channelTitle", "") or ""
-                video_thumb = (((sn.get("thumbnails") or {}).get("high") or {}).get("url")) or ""
-        except Exception:
-            pass
+    video_title, video_thumb, channel_title = await yt_get_video_snippet(video_id)
 
-    # 2) コメント取得
-    rows = []
+    rows: List[Dict[str, Any]] = []
     next_token = ""
     error = ""
 
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
-            if mode == "replies":
-                if not parent_id:
-                    return Response("missing parent-id for replies", status=400)
-                params = {
-                    "part": "snippet",
-                    "parentId": parent_id,
-                    "maxResults": 100,
-                    "textFormat": "plainText",
-                    "key": API_KEY,
-                }
-                if page_token:
-                    params["pageToken"] = page_token
-                body = await yt_get_json(session, "comments", params)
-                next_token = (body.get("nextPageToken") or "").strip()
+    if not API_KEY:
+        error = "Missing API_KEY"
+        return await render_template(
+            "comment.html",
+            title="Comments",
+            error=error,
+            video_id=video_id,
+            watch_url=watch_url,
+            video_title=video_title,
+            video_thumb=video_thumb,
+            channel_title=channel_title,
+            mode=mode,
+            parent_id=parent_id,
+            rows=[],
+            next_page_token="",
+        )
 
-                idx = 0
-                for it in (body.get("items") or []):
-                    idx += 1
-                    sn = (it.get("snippet") or {})
-                    author_url = sn.get("authorChannelUrl", "") or ""
-                    author_name = sn.get("authorDisplayName", "") or ""
-                    cid = it.get("id", "") or ""
-                    rows.append({
+    async def yt_get_json(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                txt = await resp.text()
+                if resp.status != 200:
+                    raise RuntimeError(f"{endpoint} failed {resp.status}: {txt}")
+                return await resp.json()
+
+    def user_id(author_channel_url: str, author_name: str) -> str:
+        try:
+            if author_channel_url:
+                u = urllib.parse.urlparse(author_channel_url)
+                path = urllib.parse.unquote(u.path or "")
+                m = re.search(r"/@([^/]+)", path)
+                if m:
+                    return "@" + m.group(1)
+        except Exception:
+            pass
+        return author_name or ""
+
+    try:
+        if mode == "replies":
+            if not parent_id:
+                return Response("missing parent-id", status=400)
+            params = {
+                "part": "snippet",
+                "parentId": parent_id,
+                "maxResults": 100,
+                "textFormat": "plainText",
+                "key": API_KEY,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            body = await yt_get_json("comments", params)
+            next_token = (body.get("nextPageToken") or "").strip()
+
+            idx = 0
+            for it in (body.get("items") or []):
+                idx += 1
+                sn = it.get("snippet", {}) or {}
+                aurl = sn.get("authorChannelUrl", "") or ""
+                aname = sn.get("authorDisplayName", "") or ""
+                cid = it.get("id", "") or ""
+                rows.append(
+                    {
                         "no": str(idx),
-                        "publishedAtIso": sn.get("publishedAt", "") or "",
                         "publishedAt": iso_to_jst_str(sn.get("publishedAt", "") or ""),
-                        "text": trim_outer_blank_lines(sn.get("textOriginal") or sn.get("textDisplay") or ""),
+                        "publishedAtIso": sn.get("publishedAt", "") or "",
+                        "text": (sn.get("textOriginal") or sn.get("textDisplay") or "").replace("\r\n", "\n").replace("\r", "\n"),
                         "likeCount": sn.get("likeCount", 0) or 0,
                         "replyCount": 0,
-                        "userId": extract_user_id(author_url, author_name),
-                        "authorChannelUrl": author_url,
+                        "userId": user_id(aurl, aname),
                         "iconUrl": sn.get("authorProfileImageUrl", "") or "",
-                        "commentId": cid,
                         "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
-                        "parentId": parent_id,
-                    })
-            else:
-                params = {
-                    "part": "snippet",
-                    "videoId": video_id,
-                    "maxResults": 100,
-                    "order": "relevance",
-                    "textFormat": "plainText",
-                    "key": API_KEY,
-                }
-                if page_token:
-                    params["pageToken"] = page_token
-                body = await yt_get_json(session, "commentThreads", params)
-                next_token = (body.get("nextPageToken") or "").strip()
+                    }
+                )
+        else:
+            params = {
+                "part": "snippet",
+                "videoId": video_id,
+                "maxResults": 100,
+                "order": "relevance",
+                "textFormat": "plainText",
+                "key": API_KEY,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            body = await yt_get_json("commentThreads", params)
+            next_token = (body.get("nextPageToken") or "").strip()
 
-                idx = 0
-                for th in (body.get("items") or []):
-                    idx += 1
-                    sn = (th.get("snippet") or {})
-                    top = (sn.get("topLevelComment") or {})
-                    top_sn = (top.get("snippet") or {})
-                    total_reply = sn.get("totalReplyCount", 0) or 0
+            idx = 0
+            for th in (body.get("items") or []):
+                idx += 1
+                sn = th.get("snippet", {}) or {}
+                total_reply = sn.get("totalReplyCount", 0) or 0
+                top = sn.get("topLevelComment", {}) or {}
+                top_sn = top.get("snippet", {}) or {}
+                aurl = top_sn.get("authorChannelUrl", "") or ""
+                aname = top_sn.get("authorDisplayName", "") or ""
+                cid = top.get("id", "") or ""
 
-                    author_url = top_sn.get("authorChannelUrl", "") or ""
-                    author_name = top_sn.get("authorDisplayName", "") or ""
-                    cid = top.get("id", "") or ""
-
-                    rows.append({
+                rows.append(
+                    {
                         "no": str(idx),
-                        "publishedAtIso": top_sn.get("publishedAt", "") or "",
                         "publishedAt": iso_to_jst_str(top_sn.get("publishedAt", "") or ""),
-                        "text": trim_outer_blank_lines(top_sn.get("textOriginal") or top_sn.get("textDisplay") or ""),
+                        "publishedAtIso": top_sn.get("publishedAt", "") or "",
+                        "text": (top_sn.get("textOriginal") or top_sn.get("textDisplay") or "").replace("\r\n", "\n").replace("\r", "\n"),
                         "likeCount": top_sn.get("likeCount", 0) or 0,
                         "replyCount": total_reply,
-                        "userId": extract_user_id(author_url, author_name),
-                        "authorChannelUrl": author_url,
+                        "userId": user_id(aurl, aname),
                         "iconUrl": top_sn.get("authorProfileImageUrl", "") or "",
-                        "commentId": cid,
                         "commentUrl": f"{watch_url}&lc={cid}" if cid else watch_url,
-                        "parentId": cid,  # replies用
-                    })
-        except Exception as e:
-            error = str(e)
+                        "commentId": cid,
+                    }
+                )
+
+    except Exception as e:
+        error = str(e)
 
     return await render_template(
         "comment.html",
@@ -414,303 +765,44 @@ async def comment():
         next_page_token=next_token,
     )
 
-# ---------------------------
-# Share image generation
-# ---------------------------
-def _to_share_items(rows: list[dict]) -> list[dict]:
-    out = []
-    for r in rows or []:
-        out.append({
-            "thumb": r.get("thumbnails") or "",
-            "title": r.get("title") or "",
-            "channel": r.get("name") or "",
-            "url": r.get("video_url") or "",
-        })
-    return out
-
-def _is_black(px, thr=16):
-    # px is (r,g,b)
-    return (px[0] <= thr and px[1] <= thr and px[2] <= thr)
-
-def _crop_black_sides_for_shorts(img):
-    """
-    Shortsサムネで左右黒ベタが入ってるケースを雑に除去。
-    - 完全に黒に近い列が左右に連続してるときだけ crop
-    """
-    try:
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        w, h = img.size
-        if w < 60 or h < 60:
-            return img
-
-        # 横長(16:9)に見えるものだけ対象（縦長はそのまま）
-        if w <= h:
-            return img
-
-        px = img.load()
-        sample_step_y = max(1, h // 60)
-        def col_black_ratio(x):
-            black = 0
-            total = 0
-            for y in range(0, h, sample_step_y):
-                total += 1
-                if _is_black(px[x, y]):
-                    black += 1
-            return black / max(1, total)
-
-        # 左端から黒率が高い列をスキップ
-        left = 0
-        right = w - 1
-        black_thr = 0.92
-
-        # 端の数十列だけ見る（全部見ると遅い）
-        max_scan = min(w // 2, 220)
-
-        l = 0
-        while l < max_scan and col_black_ratio(l) >= black_thr:
-            l += 1
-
-        r = w - 1
-        scanned = 0
-        while scanned < max_scan and col_black_ratio(r) >= black_thr:
-            r -= 1
-            scanned += 1
-
-        # ほぼ変化なしならそのまま
-        if l <= 2 and (w - 1 - r) <= 2:
-            return img
-
-        # 取りすぎ防止（中央が極端に細くなるなら無視）
-        new_w = r - l + 1
-        if new_w < int(w * 0.55):
-            return img
-
-        return img.crop((l, 0, r + 1, h))
-    except Exception:
-        return img
-
-async def _fetch_image_bytes(session: aiohttp.ClientSession, url: str) -> bytes | None:
-    if not url:
-        return None
-    try:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                return None
-            return await resp.read()
-    except Exception:
-        return None
-
-def _safe_int(s: str, default: int) -> int:
-    try:
-        return int(str(s).strip())
-    except Exception:
-        return default
 
 @app.get("/share_image", strict_slashes=False)
 async def share_image():
-    """
-    /share_image?sid=...&kind=normal|shorts
-      &rows=...&cols=...&n=...&pad=...&thumb_w=...
-      &show_title=1&show_channel=1
-    """
+    """sidの検索結果から、X用まとめ画像を生成して「新規タブ表示」させる（Content-Disposition: inline）"""
     sid = (request.args.get("sid", "") or "").strip()
-    kind = (request.args.get("kind", "normal") or "normal").strip()  # normal/shorts
+    kind = (request.args.get("kind", "normal") or "normal").strip()  # normal | shorts
 
-    cached = _cache_get(SHARE_CACHE, sid, SHARE_TTL_SEC)
-    if not cached:
-        return Response("share cache expired. run search again.", status=400)
+    payload = share_get(sid)
+    if not payload:
+        return Response("share data expired. Please search again.", status=410)
 
-    items_dict = cached[0]
-    items = (items_dict.get(kind) or [])
+    items = payload.get(kind) or []
 
-    # layout
-    rows = _safe_int(request.args.get("rows", "0"), 0)
-    cols = _safe_int(request.args.get("cols", "0"), 0)
-    n_req = _safe_int(request.args.get("n", "0"), 0)
-    pad = _safe_int(request.args.get("pad", "8"), 8)
+    n = safe_int(request.args.get("n", ""), default=len(items))
+    cols = safe_int(request.args.get("cols", ""), default=4)
+    rows = safe_int(request.args.get("rows", ""), default=max(1, math.ceil(n / max(cols, 1))))
+    thumb_w = safe_int(request.args.get("thumb_w", ""), default=480 if kind == "normal" else 360)
+    pad = safe_int(request.args.get("pad", ""), default=6)
 
-    show_title = request.args.get("show_title", "1") in ("1", "true", "on", "yes")
-    show_channel = request.args.get("show_channel", "1") in ("1", "true", "on", "yes")
+    show_title = request.args.get("show_title", "1") != "0"
+    show_channel = request.args.get("show_channel", "1") != "0"
 
-    # thumb width (blank -> default)
-    thumb_w = request.args.get("thumb_w", "").strip()
-    if thumb_w:
-        cell_w = _safe_int(thumb_w, 480)
-    else:
-        cell_w = 480 if kind == "normal" else 360
+    img_bytes = await render_share_image(
+        items=items,
+        cols=cols,
+        rows=rows,
+        n=n,
+        thumb_w=thumb_w,
+        pad=pad,
+        show_title=show_title,
+        show_channel=show_channel,
+        mode=kind,
+    )
 
-    if not items:
-        return Response("no items", status=400)
-
-    if n_req <= 0:
-        n_req = len(items)
-    items = items[:min(n_req, len(items))]
-
-    # rows/cols auto: prefer square-ish
-    n = len(items)
-    if rows <= 0 and cols <= 0:
-        cols = max(1, int(math.sqrt(n)))
-        rows = (n + cols - 1) // cols
-    elif rows <= 0:
-        rows = (n + cols - 1) // cols
-    elif cols <= 0:
-        cols = (n + rows - 1) // rows
-
-    # build canvas sizes
-    # Normal: 16:9, Shorts: 9:16
-    if kind == "normal":
-        thumb_h = int(cell_w * 9 / 16)
-    else:
-        thumb_h = int(cell_w * 16 / 9)
-
-    line_h = 22
-    title_h = (line_h * 2 + 6) if show_title else 0
-    channel_h = (line_h + 2) if show_channel else 0
-    meta_h = title_h + channel_h
-
-    cell_h = thumb_h + meta_h + 8  # a little bottom padding
-
-    out_w = pad + cols * (cell_w + pad)
-    out_h = pad + rows * (cell_h + pad)
-
-    # safety: avoid huge images (memory)
-    MAX_PIXELS = 80_000_000  # ~80MP
-    if out_w * out_h > MAX_PIXELS:
-        return Response(f"image too large ({out_w}x{out_h}). reduce rows/cols or thumb_w.", status=400)
-
-    # lazy import Pillow
-    from PIL import Image, ImageDraw, ImageFont
-
-    # font
-    def _load_font(size: int):
-        for p in [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]:
-            try:
-                return ImageFont.truetype(p, size=size)
-            except Exception:
-                continue
-        return ImageFont.load_default()
-
-    font_title = _load_font(18)
-    font_channel = _load_font(16)
-
-    img = Image.new("RGB", (out_w, out_h), (245, 245, 245))
-    draw = ImageDraw.Draw(img)
-
-    timeout = aiohttp.ClientTimeout(total=60)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        # fetch all thumbs concurrently (but not too many at once)
-        sem = asyncio.Semaphore(12)
-
-        async def load_thumb(url: str):
-            async with sem:
-                b = await _fetch_image_bytes(session, url)
-                if not b:
-                    return None
-                try:
-                    im = Image.open(io.BytesIO(b)).convert("RGB")
-                    return im
-                except Exception:
-                    return None
-
-        import io
-        tasks = [load_thumb(it.get("thumb", "")) for it in items]
-        thumbs = await asyncio.gather(*tasks)
-
-    def wrap_text(text: str, font, max_w: int, max_lines: int):
-        text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-        text = text.strip()
-        if not text:
-            return []
-        # aggressive single-line for channel
-        if max_lines == 1:
-            t = text.replace("\n", " ")
-            # ellipsis
-            while True:
-                w = draw.textlength(t, font=font)
-                if w <= max_w or len(t) <= 1:
-                    return [t]
-                t = t[:-2].rstrip() + "…"
-        # title: simple wrap
-        out = []
-        for raw_line in text.split("\n"):
-            s = raw_line.strip()
-            if not s:
-                continue
-            buf = ""
-            for ch in s:
-                cand = buf + ch
-                if draw.textlength(cand, font=font) <= max_w:
-                    buf = cand
-                else:
-                    if buf:
-                        out.append(buf)
-                    buf = ch
-                if len(out) >= max_lines:
-                    break
-            if buf and len(out) < max_lines:
-                out.append(buf)
-            if len(out) >= max_lines:
-                break
-        if len(out) >= max_lines:
-            # ellipsis last line if too long
-            last = out[-1]
-            while draw.textlength(last + "…", font=font) > max_w and len(last) > 1:
-                last = last[:-1]
-            out[-1] = last + "…"
-        return out[:max_lines]
-
-    def paste_contain(canvas: Image.Image, im: Image.Image, x: int, y: int, w: int, h: int):
-        if im is None:
-            return
-        src = im
-        if kind == "shorts":
-            src = _crop_black_sides_for_shorts(src)
-        # contain
-        sw, sh = src.size
-        scale = min(w / sw, h / sh)
-        nw, nh = max(1, int(sw * scale)), max(1, int(sh * scale))
-        resized = src.resize((nw, nh))
-        ox = x + (w - nw) // 2
-        oy = y + (h - nh) // 2
-        canvas.paste(resized, (ox, oy))
-
-    # draw tiles
-    for i, it in enumerate(items):
-        r = i // cols
-        c = i % cols
-        x0 = pad + c * (cell_w + pad)
-        y0 = pad + r * (cell_h + pad)
-
-        # tile bg
-        draw.rounded_rectangle([x0, y0, x0 + cell_w, y0 + cell_h], radius=14, fill=(255, 255, 255), outline=(230, 230, 230))
-
-        # thumb area
-        tx0, ty0 = x0 + 6, y0 + 6
-        tw, th = cell_w - 12, thumb_h - 0
-        # use contain for both; black-bar removal is handled for shorts
-        paste_contain(img, thumbs[i], tx0, ty0, tw, th)
-
-        # title/channel
-        text_x = x0 + 8
-        text_y = y0 + 6 + thumb_h + 6
-
-        max_w = cell_w - 16
-        if show_title:
-            lines = wrap_text(it.get("title", ""), font_title, max_w, 2)
-            for li, line in enumerate(lines):
-                draw.text((text_x, text_y + li * line_h), line, font=font_title, fill=(20, 20, 20))
-            text_y += title_h
-
-        if show_channel:
-            ch_lines = wrap_text(it.get("channel", ""), font_channel, max_w, 1)
-            if ch_lines:
-                draw.text((text_x, text_y), ch_lines[0], font=font_channel, fill=(80, 80, 80))
-
-    # save
-    out_path = f"/tmp/share_{sid}_{kind}.png"
-    img.save(out_path, format="PNG", optimize=True)
-    return await send_file(out_path, mimetype="image/png", as_attachment=True, attachment_filename=f"youtube_share_{sid}_{kind}.png")
+    # inline表示（ダウンロード強制しない）
+    headers = {
+        "Content-Type": "image/png",
+        "Content-Disposition": f'inline; filename="x_share_{kind}_{sid}.png"',
+        "Cache-Control": "no-store",
+    }
+    return Response(img_bytes, headers=headers)
