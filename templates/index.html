@@ -13,6 +13,17 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
 
   <style>
+    /* Sticky search area (追従) */
+    #sticky-search {
+      position: sticky;
+      top: 0;
+      z-index: 2000;
+      background: #fff;
+      border-bottom: 1px solid #e6e6e6;
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+
     #fav-table th { background-color: pink; }
     .text-content { max-height: 100px; overflow-y: auto; }
     .nowrap { white-space: nowrap; }
@@ -41,7 +52,7 @@
       const det = document.getElementById("search-details");
       if (det) {
         det.addEventListener("toggle", () => {
-          if (det.open) det.scrollIntoView({behavior:"smooth", block:"start"});
+          det.scrollIntoView({behavior:"smooth", block:"start"});
         });
       }
     });
@@ -49,84 +60,76 @@
 </head>
 
 <body>
-  <div class="container-fluid mt-3">
-    <details id="search-details" open>
-      <summary class="h5 mb-2">検索フォーム（開閉）</summary>
+  <div class="container-fluid">
 
-      <form method="GET" action="/scraping" class="border rounded p-2 mb-3">
-        <div class="form-row">
-          <div class="col-md-3 mb-2">
-            <label class="small mb-1">検索ワード</label>
-            <input type="text" class="form-control" name="word" value="{{ form.word|default('') }}">
-          </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">from</label>
-            <input type="date" class="form-control" name="from" value="{{ form.from|default('') }}">
-          </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">to</label>
-            <input type="date" class="form-control" name="to" value="{{ form.to|default('') }}">
-          </div>
-          <div class="col-md-3 mb-2">
-            <label class="small mb-1">チャンネルID / URL</label>
-            <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id|default('') }}">
-          </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">取得件数</label>
-            <input type="number" class="form-control" name="video-count" value="{{ form.video_count|default('200') }}">
-          </div>
-        </div>
+    <!-- Sticky Search (追従) -->
+    <div id="sticky-search">
+      <details id="search-details" open>
+        <summary class="h5 mb-2">検索フォーム（開閉）</summary>
 
-        <div class="form-row">
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">再生数 下限</label>
-            <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min|default('') }}">
+        <form method="GET" action="/scraping" class="border rounded p-2 mb-2">
+          <div class="form-row">
+            <div class="col-md-3 mb-2">
+              <label class="small mb-1">検索ワード</label>
+              <input type="text" class="form-control" name="word" value="{{ form.word|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">from</label>
+              <input type="date" class="form-control" name="from" value="{{ form.from|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">to</label>
+              <input type="date" class="form-control" name="to" value="{{ form.to|default('') }}">
+            </div>
+            <div class="col-md-3 mb-2">
+              <label class="small mb-1">チャンネルID / URL</label>
+              <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">取得件数</label>
+              <input type="number" class="form-control" name="video-count" value="{{ form.video_count|default('200') }}">
+            </div>
           </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">再生数 上限</label>
-            <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max|default('') }}">
-          </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">登録者 下限</label>
-            <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min|default('') }}">
-          </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">登録者 上限</label>
-            <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max|default('') }}">
-          </div>
-          <div class="col-md-2 mb-2">
-            <label class="small mb-1">並び順</label>
-            <select class="form-control" name="order">
-              <option value="date" {% if form.order|default('date') == 'date' %}selected{% endif %}>新しい順</option>
-              <option value="viewcount" {% if form.order|default('date') == 'viewcount' %}selected{% endif %}>再生数順</option>
-            </select>
-          </div>
-          <div class="col-md-2 mb-2 d-flex align-items-end">
-            <button type="submit" class="btn btn-primary btn-block">検索</button>
-          </div>
-        </div>
 
-        <div class="small-muted">DEBUG share_sid={{ share_sid|default('') }}</div>
-      </form>
-    </details>
+          <div class="form-row">
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">再生数 下限</label>
+              <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">再生数 上限</label>
+              <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">登録者 下限</label>
+              <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">登録者 上限</label>
+              <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max|default('') }}">
+            </div>
+            <div class="col-md-2 mb-2">
+              <label class="small mb-1">並び順</label>
+              <select class="form-control" name="order">
+                <option value="date" {% if form.order|default('date') == 'date' %}selected{% endif %}>新しい順</option>
+                <option value="viewcount" {% if form.order|default('date') == 'viewcount' %}selected{% endif %}>再生数順</option>
+              </select>
+            </div>
+            <div class="col-md-2 mb-2 d-flex align-items-end">
+              <button type="submit" class="btn btn-primary btn-block">検索</button>
+            </div>
+          </div>
 
-    <div class="card-body p-0">
+          {% if font_hint %}
+            <div class="small-muted">{{ font_hint }}</div>
+          {% endif %}
+          <div class="small-muted">DEBUG share_sid={{ share_sid|default('') }}</div>
+        </form>
+      </details>
+    </div>
+
+    <div class="card-body p-0 mt-2">
       <div class="p-2">検索結果: {{ sorce | length }}件</div>
-
-      {% set cols = [
-        'publishedAt',
-        'title',
-        'description',
-        'viewCount',
-        'likeCount',
-        'commentCount',
-        'videoDuration',
-        'thumbnails',
-        'video_url',
-        'name',
-        'subscriberCount',
-        'channel_icon'
-      ] %}
 
       <table id="fav-table" class="table table-bordered table-sm">
         <thead>
@@ -161,7 +164,7 @@
             <td class="nowrap">
               {% set th = row.get('thumbnails','') %}
               {% if th %}
-              <a href="{{ th }}" target="_blank" rel="noopener"><img src="{{ th }}" height="60"></a>
+                <a href="{{ th }}" target="_blank" rel="noopener"><img src="{{ th }}" height="60"></a>
               {% endif %}
             </td>
             <td><div class="text-content">{{ row.get('video_url','')|safe }}</div></td>
@@ -191,10 +194,10 @@
 
       <div class="form-row">
         <div class="col-auto">
-          <label class="small mb-1">対象件数 n</label>
+          <label class="small mb-1">対象件数 n（約数候補はこれに連動）</label>
           <input id="share-n" type="number" class="form-control form-control-sm"
                  min="1" max="{{ sorce|length }}"
-                 value="{{ 36 if (sorce|length) >= 36 else (sorce|length) }}">
+                 value="{{ (sorce|length) if (sorce|length)<=60 else 60 }}">
         </div>
 
         <div class="col-auto">
@@ -217,9 +220,10 @@
       </div>
 
       <div class="mt-2">
-        <div class="small-muted mb-1">行×列（約数候補）</div>
+        <div class="small-muted mb-1">行×列（約数/近似候補）</div>
         <div id="share-grid-list" class="grid-btns"></div>
         <div id="share-reco" class="small-muted mt-2"></div>
+        <div class="small-muted mt-1">選択中：<span id="share-selected">-</span></div>
       </div>
 
       <div class="mt-3">
@@ -246,9 +250,12 @@
       const reco = document.getElementById("share-reco");
       const preview = document.getElementById("share-preview");
       const openBtn = document.getElementById("share-open");
+      const selectedLabel = document.getElementById("share-selected");
 
       // thumbs are 16:9
       const CELL_RATIO = 16/9;
+
+      let selected = null; // [rows, cols]
 
       function exactPairs(n){
         const pairs = [];
@@ -297,46 +304,78 @@
       }
 
       function setPreview(r, c, n, w){
+        selected = [r, c];
+        selectedLabel.textContent = `${r}×${c}`;
         const url = `/share_image?sid=${encodeURIComponent(sid)}&rows=${r}&cols=${c}&n=${n}&w=${w}`;
         openBtn.href = url;
         preview.src = url;
         preview.scrollIntoView({behavior:"smooth", block:"start"});
+        renderButtons();
       }
 
-      function render(){
-        let n = parseInt(nInput.value, 10) || 1;
-        n = Math.max(1, Math.min(n, total));
-        nInput.value = n;
+      let _pairs = [];
+      let _best = null;
+      let _approx = false;
+      let _n = 1;
+      let _w = 1600;
+      let _target = 16/9;
 
-        const target = parseFloat(targetSel.value);
-        const w = parseInt(wSel.value, 10) || 1600;
-
-        let pairs = exactPairs(n);
-        let approx = false;
-        if(pairs.length <= 2 && n > 12){
-          pairs = approxPairs(n);
-          approx = true;
-        }
-
-        const best = bestPair(pairs, target);
-
+      function renderButtons(){
         list.innerHTML = "";
-        reco.textContent = best
-          ? `おすすめ: ${best[0]}×${best[1]}（推定 全体比率 ${best[2].toFixed(2)}:1）${approx ? " ※近似候補含む" : ""}`
-          : "";
-
-        pairs.forEach(([r,c])=>{
+        _pairs.forEach(([r,c])=>{
           const ratio = overallRatio(r,c);
           const btn = document.createElement("button");
           btn.type = "button";
-          btn.className = "btn btn-sm " + (best && r===best[0] && c===best[1] ? "btn-success" : "btn-outline-secondary");
+
+          const isBest = _best && r===_best[0] && c===_best[1];
+          const isSel = selected && r===selected[0] && c===selected[1];
+
+          if (isSel && isBest) btn.className = "btn btn-sm btn-success";
+          else if (isSel) btn.className = "btn btn-sm btn-info";
+          else if (isBest) btn.className = "btn btn-sm btn-outline-success";
+          else btn.className = "btn btn-sm btn-outline-secondary";
+
           btn.textContent = `${r}×${c}`;
           btn.title = `推定比率 ${ratio.toFixed(2)}:1`;
-          btn.addEventListener("click", ()=> setPreview(r,c,n,w));
+          btn.addEventListener("click", ()=> setPreview(r,c,_n,_w));
           list.appendChild(btn);
         });
+      }
 
-        if(best) setPreview(best[0], best[1], n, w);
+      function render(){
+        _n = parseInt(nInput.value, 10) || 1;
+        _n = Math.max(1, Math.min(_n, total));
+        nInput.value = _n;
+
+        _target = parseFloat(targetSel.value);
+        _w = parseInt(wSel.value, 10) || 1600;
+
+        _pairs = exactPairs(_n);
+        _approx = false;
+        if(_pairs.length <= 2 && _n > 12){
+          _pairs = approxPairs(_n);
+          _approx = true;
+        }
+
+        _best = bestPair(_pairs, _target);
+
+        reco.textContent = _best
+          ? `おすすめ: ${_best[0]}×${_best[1]}（推定 全体比率 ${_best[2].toFixed(2)}:1）${_approx ? " ※近似候補含む" : ""}`
+          : "";
+
+        if(!_best){
+          selected = null;
+        } else {
+          const ok = selected && _pairs.some(([r,c])=> r===selected[0] && c===selected[1]);
+          if(!ok) selected = [_best[0], _best[1]];
+        }
+
+        selectedLabel.textContent = selected ? `${selected[0]}×${selected[1]}` : "-";
+        renderButtons();
+
+        if(selected){
+          setPreview(selected[0], selected[1], _n, _w);
+        }
       }
 
       nInput.addEventListener("change", render);
@@ -346,6 +385,7 @@
     })();
     </script>
     {% endif %}
+
   </div>
 </body>
 </html>

@@ -1,7 +1,6 @@
 import os
 import re
 import time
-import math
 import io
 import secrets
 import urllib.parse
@@ -29,7 +28,7 @@ JST = timezone(timedelta(hours=9))
 
 
 # ------------------------------------------------------------
-# Small in-memory caches
+# In-memory caches (Render free plan friendly)
 # ------------------------------------------------------------
 SEARCH_CACHE: dict[tuple, tuple[float, list]] = {}
 SEARCH_CACHE_TTL_SEC = 600  # 10 minutes
@@ -130,33 +129,20 @@ def extract_video_id(s: str) -> str | None:
     return m.group(1) if m else None
 
 
-def build_share_items(sorce: list[dict], limit: int = 200) -> list[dict]:
+def build_share_items(sorce: list[dict], limit: int = 500) -> list[dict]:
+    """
+    X用まとめ画像に必要な最低限だけ保持（サムネURL + タイトル + チャンネル名）
+    """
     items: list[dict] = []
     for row in (sorce or [])[:max(1, int(limit))]:
         if not isinstance(row, dict):
             continue
-        # your search_youtube output keys (best-effort)
         thumb = row.get("thumbnails") or row.get("thumbnail") or ""
         title = row.get("title") or ""
         url = row.get("video_url") or row.get("videoUrl") or ""
         ch = row.get("name") or ""
         items.append({"thumb": thumb, "title": title, "url": url, "channel": ch})
     return items
-
-
-async def yt_get_json(session: aiohttp.ClientSession, endpoint: str, params: dict):
-    url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
-    async with session.get(url) as resp:
-        text = await resp.text()
-        if resp.status != 200:
-            raise RuntimeError(f"{endpoint} failed {resp.status}: {text}")
-        try:
-            js = await resp.json()
-        except Exception:
-            raise RuntimeError(f"{endpoint} invalid json: {text}")
-        if "error" in js:
-            raise RuntimeError(str(js["error"]))
-        return js
 
 
 # ------------------------------------------------------------
@@ -170,6 +156,7 @@ async def home():
         sorce=[],
         form=default_form(),
         share_sid="",
+        font_hint=_font_hint_message(),
     )
 
 
@@ -216,8 +203,9 @@ async def scraping():
             )
         _cache_set(SEARCH_CACHE, cache_key, sorce)
 
+    # share sid for X-image
     sid = new_share_sid()
-    SHARE_CACHE[sid] = (time.time(), build_share_items(sorce, limit=500))
+    SHARE_CACHE[sid] = (time.time(), build_share_items(sorce if isinstance(sorce, list) else [], limit=500))
 
     form = {
         "word": word,
@@ -239,6 +227,7 @@ async def scraping():
         sorce=sorce if isinstance(sorce, list) else [],
         form=form,
         share_sid=sid,
+        font_hint=_font_hint_message(),
     )
 
 
@@ -249,16 +238,48 @@ async def scraping():
 from PIL import Image, ImageDraw, ImageFont
 
 
+def _font_supports_jp(font) -> bool:
+    """
+    Quick check: if a Japanese glyph can't be rasterized, titles would appear as □□.
+    """
+    try:
+        m = font.getmask("あ")
+        return (m.size[0] * m.size[1]) > 0
+    except Exception:
+        return False
+
+
+def _font_hint_message() -> str:
+    return (
+        "まとめ画像の日本語が□になる場合："
+        "repo に fonts/NotoSansJP-Regular.otf を置くか、環境変数 FONT_PATH にフォントパスを設定してください。"
+    )
+
+
 def _load_font(size: int):
-    candidates = [
+    """
+    Prefer local repo font first to avoid □□ in Render.
+    Place: ./fonts/NotoSansJP-Regular.otf (recommended)
+    Or set env: FONT_PATH=/path/to/font.otf
+    """
+    local_candidates = [
+        os.environ.get("FONT_PATH", "").strip(),
+        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansJP-Regular.otf"),
+        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansJP-Regular.ttf"),
+        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansCJKjp-Regular.otf"),
+    ]
+    sys_candidates = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.otf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
-    for p in candidates:
+    for p in (local_candidates + sys_candidates):
+        if not p:
+            continue
         try:
-            return ImageFont.truetype(p, size=size)
+            f = ImageFont.truetype(p, size=size)
+            return f
         except Exception:
             pass
     return ImageFont.load_default()
@@ -305,7 +326,7 @@ async def _fetch_image_bytes(session: aiohttp.ClientSession, url: str) -> bytes 
 
 
 def _paste_thumb_contain(canvas: Image.Image, img: Image.Image, x: int, y: int, w: int, h: int):
-    # ✅ no vertical crop: contain
+    # ✅ no crop: contain
     img = img.convert("RGB")
     img.thumbnail((w, h), Image.LANCZOS)
     ox = x + (w - img.width) // 2
@@ -342,6 +363,7 @@ async def share_image():
     draw = ImageDraw.Draw(canvas)
     font = _load_font(22)
     font_small = _load_font(18)
+    font_ok = _font_supports_jp(font)
 
     target = items[:n]
     async with aiohttp.ClientSession() as session:
@@ -365,16 +387,18 @@ async def share_image():
         else:
             draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], fill=(245, 245, 245))
 
-        tx = x0
-        ty = y0 + thumb_h + 6
-        lines = _wrap_text(draw, it.get("title", ""), font, cell_w, max_lines=2)
-        for li, line in enumerate(lines[:2]):
-            draw.text((tx, ty + li * 26), line, fill=(20, 20, 20), font=font)
+        # Titles: if JP font missing -> skip to avoid □□
+        if font_ok:
+            tx = x0
+            ty = y0 + thumb_h + 6
+            lines = _wrap_text(draw, it.get("title", ""), font, cell_w, max_lines=2)
+            for li, line in enumerate(lines[:2]):
+                draw.text((tx, ty + li * 26), line, fill=(20, 20, 20), font=font)
 
-        ch = (it.get("channel") or "").strip()
-        if ch:
-            ch_line = _wrap_text(draw, ch, font_small, cell_w, max_lines=1)[0]
-            draw.text((tx, y0 + thumb_h + title_h - 22), ch_line, fill=(120, 120, 120), font=font_small)
+            ch = (it.get("channel") or "").strip()
+            if ch:
+                ch_line = _wrap_text(draw, ch, font_small, cell_w, max_lines=1)[0]
+                draw.text((tx, y0 + thumb_h + title_h - 22), ch_line, fill=(120, 120, 120), font=font_small)
 
     buf = io.BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
