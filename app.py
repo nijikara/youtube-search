@@ -4,7 +4,6 @@ import time
 import uuid
 import math
 import urllib.parse
-import inspect
 from datetime import datetime, timezone, timedelta
 
 import aiohttp
@@ -77,101 +76,6 @@ def _to_int(v, default=0):
         return int(float(s))
     except Exception:
         return default
-
-
-async def _search_youtube_compat(
-    channel_id: str,
-    word: str,
-    from_date: str,
-    to_date: str,
-    viewcount_min,
-    subscribercount_min,
-    video_count,
-    viewcount_max,
-    subscribercount_max,
-    order: str,
-):
-    """search_youtube.search_youtube の引数名が変わっても動くように吸収する。
-
-    - 旧: search_youtube(channel_id, key_word, published_from, published_to, viewcount_level, subscribercount_level, video_count, is_get_comment)
-    - 新: channel_id_input / viewcount_min / viewcount_max / order... など
-    """
-    fn = getattr(search_youtube, "search_youtube", None)
-    if fn is None:
-        raise RuntimeError("search_youtube.search_youtube not found")
-
-    # まずは signature を見て、受け取れる kwargs だけ渡す
-    try:
-        sig = inspect.signature(fn)
-        params = sig.parameters
-        kwargs = {}
-
-        # channel
-        if "channel_id_input" in params:
-            kwargs["channel_id_input"] = channel_id
-        elif "channel_id" in params:
-            kwargs["channel_id"] = channel_id
-        elif "channelId" in params:
-            kwargs["channelId"] = channel_id
-
-        # keyword
-        if "key_word" in params:
-            kwargs["key_word"] = word
-        elif "keyword" in params:
-            kwargs["keyword"] = word
-        elif "q" in params:
-            kwargs["q"] = word
-
-        # published range
-        if "published_from" in params:
-            kwargs["published_from"] = from_date
-        if "published_to" in params:
-            kwargs["published_to"] = to_date
-
-        # min thresholds
-        if "viewcount_min" in params:
-            kwargs["viewcount_min"] = viewcount_min
-        elif "viewcount_level" in params:
-            kwargs["viewcount_level"] = _to_int(viewcount_min, 0)
-        if "subscribercount_min" in params:
-            kwargs["subscribercount_min"] = subscribercount_min
-        elif "subscribercount_level" in params:
-            kwargs["subscribercount_level"] = _to_int(subscribercount_min, 0)
-
-        # count
-        if "video_count" in params:
-            kwargs["video_count"] = video_count
-        elif "videoCount" in params:
-            kwargs["videoCount"] = video_count
-
-        # optional max thresholds
-        if "viewcount_max" in params:
-            kwargs["viewcount_max"] = viewcount_max
-        if "subscribercount_max" in params:
-            kwargs["subscribercount_max"] = subscribercount_max
-
-        # order
-        if "order" in params:
-            kwargs["order"] = order
-
-        # search ではコメントを取らない
-        if "is_get_comment" in params:
-            kwargs["is_get_comment"] = False
-
-        return await fn(**kwargs)
-
-    except TypeError:
-        # 最後の保険：いちばん古い順序で positional 呼び
-        return await fn(
-            channel_id,
-            word,
-            from_date,
-            to_date,
-            _to_int(viewcount_min, 0),
-            _to_int(subscribercount_min, 0),
-            _to_int(video_count, 200),
-            False,
-        )
 
 def _parse_dt_sort(s: str) -> int:
     """
@@ -299,11 +203,11 @@ async def scraping():
     )
     rows = _cache_get(cache_key)
     if rows is None:
-        rows = await _search_youtube_compat(
+        rows = await search_youtube.search_youtube(
             channel_id=channel_id,
-            word=word,
-            from_date=from_date,
-            to_date=to_date,
+            key_word=word,
+            published_from=from_date,
+            published_to=to_date,
             viewcount_min=viewcount_min,
             subscribercount_min=sub_min,
             video_count=video_count,

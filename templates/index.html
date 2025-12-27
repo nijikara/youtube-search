@@ -285,7 +285,7 @@
                 <div class="form-group col-md-2">
                   <label>検索対象</label>
                   <select class="form-control" name="video-type">
-                    <option value="" {% if form.video_type=="" %}selected{% endif %}>&nbsp;</option>
+                    <option value="" {% if form.video_type=="" %}selected{% endif %}>(両方)</option>
                     <option value="normal" {% if form.video_type=="normal" %}selected{% endif %}>通常のみ</option>
                     <option value="shorts" {% if form.video_type=="shorts" %}selected{% endif %}>ショートのみ</option>
                   </select>
