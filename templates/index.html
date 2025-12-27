@@ -115,7 +115,15 @@
                 <option value="date" {% if form.order|default('date') == 'date' %}selected{% endif %}>新しい順</option>
                 <option value="viewcount" {% if form.order|default('date') == 'viewcount' %}selected{% endif %}>再生数順</option>
               </select>
+            </div>            <div class="col-md-2 mb-2">
+              <label class="small mb-1">対象（空=両方）</label>
+              <select class="form-control" name="video-type">
+                <option value="" {% if form.video_type|default('') == '' %}selected{% endif %}></option>
+                <option value="normal" {% if form.video_type|default('') == 'normal' %}selected{% endif %}>通常</option>
+                <option value="shorts" {% if form.video_type|default('') == 'shorts' %}selected{% endif %}>ショート</option>
+              </select>
             </div>
+
             <div class="col-md-2 mb-2 d-flex align-items-end">
               <button type="submit" class="btn btn-primary btn-block">検索</button>
             </div>
@@ -238,6 +246,10 @@
             <option value="2000">2000px</option>
           </select>
         </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">間隔(px)</label>
+            <input type="number" class="form-control form-control-sm" id="share-gap" value="8" min="0" max="40">
+          </div>
       </div>
 
       <!-- Mixed mode -->
@@ -311,6 +323,7 @@
 
       const targetSel = document.getElementById("share-target");
       const wSel = document.getElementById("share-w");
+      const gapSel = document.getElementById("share-gap");
 
       const optTitle = document.getElementById("opt-title");
       const optChannel = document.getElementById("opt-channel");
@@ -394,19 +407,19 @@
         return best;
       }
 
-      function buildUrlMixed(rows, cols, n, w){
+      function buildUrlMixed(rows, cols, n, w, gap){
         const showTitle = optTitle.checked ? "1":"0";
         const showChannel = optChannel.checked ? "1":"0";
-        return `/share_image?sid=${encodeURIComponent(sid)}&rows=${rows}&cols=${cols}&n=${n}&w=${w}&show_title=${showTitle}&show_channel=${showChannel}`;
+        return `/share_image?sid=${encodeURIComponent(sid)}&rows=${rows}&cols=${cols}&n=${n}&w=${w}&gap=${gap}&show_title=${showTitle}&show_channel=${showChannel}`;
       }
 
-      function buildUrlSeparate(rn, cn, nn, rs, cs, ns, w){
+      function buildUrlSeparate(rn, cn, nn, rs, cs, ns, w, gap){
         const showTitle = optTitle.checked ? "1":"0";
         const showChannel = optChannel.checked ? "1":"0";
         return `/share_image?sid=${encodeURIComponent(sid)}&separate=1`
           + `&rows_norm=${rn}&cols_norm=${cn}&n_norm=${nn}`
           + `&rows_short=${rs}&cols_short=${cs}&n_short=${ns}`
-          + `&w=${w}&show_title=${showTitle}&show_channel=${showChannel}`;
+          + `&w=${w}&gap=${gap}&show_title=${showTitle}&show_channel=${showChannel}`;
       }
 
       function setPreview(url){

@@ -80,6 +80,7 @@ def default_form():
         "sub_min": "",
         "sub_max": "",
         "video_count": "200",
+        "video_type": "",
     }
 
 
@@ -135,6 +136,51 @@ def _is_short_url(url: str) -> bool:
     return "/shorts/" in u
 
 
+def _duration_to_seconds(s: str) -> int:
+    s = (s or "").strip()
+    if not s:
+        return -1
+    parts = [p for p in s.split(":") if p != ""]
+    try:
+        nums = [int(p) for p in parts]
+    except Exception:
+        return -1
+    if len(nums) == 3:
+        h, m, sec = nums
+    elif len(nums) == 2:
+        h = 0
+        m, sec = nums
+    elif len(nums) == 1:
+        h = 0
+        m = 0
+        sec = nums[0]
+    else:
+        return -1
+    return h * 3600 + m * 60 + sec
+
+
+def _is_short_row(row: dict) -> bool:
+    # 1) URLが /shorts/ を含むならショート扱い
+    url = (row.get("video_url") or row.get("videoUrl") or "").strip()
+    if _is_short_url(url):
+        return True
+
+    # 2) 動画時間が 60秒以下ならショート扱い（YouTube Shortsの大半を拾える）
+    dur = str(row.get("videoDuration") or row.get("duration") or "").strip()
+    sec = _duration_to_seconds(dur)
+    return 0 <= sec <= 60
+
+
+def _filter_video_type(rows: list[dict], video_type: str) -> list[dict]:
+    vt = (video_type or "").strip().lower()
+    if vt in ("short", "shorts"):
+        return [r for r in (rows or []) if isinstance(r, dict) and _is_short_row(r)]
+    if vt in ("normal", "video"):
+        return [r for r in (rows or []) if isinstance(r, dict) and not _is_short_row(r)]
+    return rows or []
+
+
+
 def build_share_items(sorce: list[dict], limit: int = 500) -> list[dict]:
     """
     X用まとめ画像に必要な最低限だけ保持
@@ -152,7 +198,7 @@ def build_share_items(sorce: list[dict], limit: int = 500) -> list[dict]:
         title = row.get("title") or ""
         url = row.get("video_url") or row.get("videoUrl") or ""
         ch = row.get("name") or ""
-        items.append({"thumb": thumb, "title": title, "url": url, "channel": ch, "is_short": _is_short_url(url)})
+        items.append({"thumb": thumb, "title": title, "url": url, "channel": ch, "is_short": _is_short_row(row)})
     return items
 
 
@@ -298,6 +344,7 @@ async def scraping():
     sub_max = request.args.get("subscribercount-max", "")
     video_count = request.args.get("video-count", "200")
     order = request.args.get("order", "date")
+    video_type = request.args.get("video-type", "")  # "" = 両方
 
     cache_key = (
         word, from_date, to_date, channel_id,
@@ -327,6 +374,7 @@ async def scraping():
         _cache_set(SEARCH_CACHE, cache_key, sorce)
 
     sorce_list = sorce if isinstance(sorce, list) else []
+    sorce_list = _filter_video_type(sorce_list, video_type)
 
     # share sid for X-image
     sid = new_share_sid()
@@ -344,6 +392,7 @@ async def scraping():
         "sub_min": sub_min,
         "sub_max": sub_max,
         "video_count": video_count,
+        "video_type": video_type,
     }
 
     return await render_template(
@@ -384,7 +433,12 @@ async def share_image():
 
     out_w = int(request.args.get("w", "1600") or 1600)
     out_w = max(800, min(out_w, 3000))
-    pad = 16
+    gap = request.args.get("gap", "")
+    try:
+        pad = int(gap) if gap != "" else 10
+    except Exception:
+        pad = 10
+    pad = max(0, min(pad, 40))
 
     # dynamic text area
     title_lines = 2 if show_title else 0
