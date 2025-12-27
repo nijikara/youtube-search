@@ -136,39 +136,14 @@ def _is_short_url(url: str) -> bool:
     return "/shorts/" in u
 
 
-def _duration_to_seconds(s: str) -> int:
-    s = (s or "").strip()
-    if not s:
-        return -1
-    parts = [p for p in s.split(":") if p != ""]
-    try:
-        nums = [int(p) for p in parts]
-    except Exception:
-        return -1
-    if len(nums) == 3:
-        h, m, sec = nums
-    elif len(nums) == 2:
-        h = 0
-        m, sec = nums
-    elif len(nums) == 1:
-        h = 0
-        m = 0
-        sec = nums[0]
-    else:
-        return -1
-    return h * 3600 + m * 60 + sec
-
-
 def _is_short_row(row: dict) -> bool:
-    # 1) URLが /shorts/ を含むならショート扱い
+    """Shorts判定は「/shorts/ URLになるか」で行う（推奨）。
+    - YouTube Shortsは“縦/正方形 + 最大3分”に拡張されており、長さだけでは判定できません。
+    - YouTube Data API v3 には Shorts フラグが無いので、search_youtube側で /shorts/{id} の挙動を見て
+      video_url を /shorts/ か /watch で返す想定です。
+    """
     url = (row.get("video_url") or row.get("videoUrl") or "").strip()
-    if _is_short_url(url):
-        return True
-
-    # 2) 動画時間が 60秒以下ならショート扱い（YouTube Shortsの大半を拾える）
-    dur = str(row.get("videoDuration") or row.get("duration") or "").strip()
-    sec = _duration_to_seconds(dur)
-    return 0 <= sec <= 60
+    return _is_short_url(url)
 
 
 def _filter_video_type(rows: list[dict], video_type: str) -> list[dict]:
@@ -435,7 +410,7 @@ async def share_image():
     out_w = max(800, min(out_w, 3000))
     gap = request.args.get("gap", "")
     try:
-        pad = int(gap) if gap != "" else 10
+        pad = int(gap) if gap != "" else 8
     except Exception:
         pad = 10
     pad = max(0, min(pad, 40))
