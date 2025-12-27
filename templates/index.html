@@ -1,5 +1,5 @@
-<!doctype html>
-<html lang="ja">
+<!DOCTYPE html>
+<html>
 <head>
   <meta charset="utf-8" />
   <title>{{ title }}</title>
@@ -8,314 +8,344 @@
         integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
         crossorigin="anonymous">
 
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
-          integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
-          crossorigin="anonymous"></script>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
-          integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
-          crossorigin="anonymous"></script>
-
   <style>
-    body { padding: 16px; }
     #fav-table th { background-color: pink; }
-    .text-content { max-height: 110px; overflow-y: auto; white-space: pre-wrap; }
-    .table td { max-width: 520px; vertical-align: top; }
-    .thumb img { border-radius: 6px; }
-    .quota-box { background:#f7f7f7; border-radius:10px; padding:10px 12px; font-size:12px; }
-    .muted { color:#666; }
-    .small { font-size:12px; }
+    .text-content { max-height: 100px; overflow-y: auto; }
     .nowrap { white-space: nowrap; }
-    .sticky-top-2 { position: sticky; top: 0; z-index: 2; background: #fff; padding-top: 8px; }
-    .error-row { background: #fff3cd; }
+    .small-muted { color:#777; font-size:12px; }
+    .grid-btns button { margin-right: 6px; margin-bottom: 6px; }
+    details summary { cursor: pointer; }
+    .preview-img { max-width:100%; border:1px solid #ddd; }
   </style>
 
-  <script id="quota-json" type="application/json">{{ quota | tojson }}</script>
-
   <script>
-    function fmt(n){
-      const x = Number(n);
-      if (!Number.isFinite(x)) return String(n ?? "");
-      return new Intl.NumberFormat("ja-JP").format(x);
-    }
+    $(document).ready(function() {
+      // URL icon + hashtag linkify (cell-only)
+      $('.text-content').each(function() {
+        var exp = /(https:\/\/www\.youtube\.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        var exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
 
-    function linkifyAndHashtagify($root){
-      const exp = /(https:\/\/www\.youtube\.com\/(watch|shorts)[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-      const exp_hash = /#+([a-zA-Z0-9亜-熙ぁ-んァ-ヶー-龥朗-鶴.\-_]+)/g;
-
-      $root.find(".js-text").each(function(){
-        const html = $(this).html();
-        let txt = html;
-        txt = txt.replace(exp, "<a href='$1' target='_blank' rel='noopener noreferrer'>🔗</a>");
-        txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank' rel='noopener noreferrer'>#$1</a>");
+        var txt = $(this).html();
+        txt = txt.replace(exp, "<a href='$1' target='_blank' rel='noopener'>🔗</a>");
+        txt = txt.replace(exp_hash, "<a href='https://www.youtube.com/hashtag/$1' target='_blank' rel='noopener'>#$1</a>");
         $(this).html(txt);
       });
-    }
 
-    $(function(){
-      // quota
-      try{
-        const q = JSON.parse(document.getElementById("quota-json").textContent || "{}");
-        $("#quota-used").text(fmt(q.used_estimate ?? 0));
-        $("#quota-remaining").text(fmt(q.remaining_estimate ?? ""));
-        $("#quota-reset").text(String(q.reset_at_jst ?? ""));
-        $("#quota-note").text(String(q.note ?? ""));
-      }catch(e){}
+      $('#fav-table').tablesorter();
 
-      // table sort
-      $("#fav-table").tablesorter({
-        theme: "default",
-        textExtraction: function(node){
-          const v = $(node).attr("data-sort-value");
-          return (v !== undefined && v !== null) ? v : $(node).text();
-        },
-        headers: {
-          3: { sorter: "digit" },  // view
-          4: { sorter: "digit" },  // like
-          5: { sorter: "digit" },  // comment
-          10:{ sorter: "digit" }   // subscriber
-        }
-      });
-
-      linkifyAndHashtagify($(document));
-
-      // 検索フォーム開閉時にそこへ飛ぶ
-      $("#searchPanel").on("shown.bs.collapse", function () {
-        document.getElementById("searchPanel").scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      $("#searchPanel").on("hidden.bs.collapse", function () {
-        document.getElementById("toggleSearchBtn").scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      // details open/close -> scroll to form
+      const det = document.getElementById("search-details");
+      if (det) {
+        det.addEventListener("toggle", () => {
+          if (det.open) det.scrollIntoView({behavior:"smooth", block:"start"});
+        });
+      }
     });
   </script>
 </head>
 
 <body>
+  <div class="container-fluid mt-3">
+    <details id="search-details" open>
+      <summary class="h5 mb-2">検索フォーム（開閉）</summary>
 
-  <div class="sticky-top-2">
-    <div class="d-flex justify-content-between align-items-start">
-      <h4 class="m-0">YouTube 検索</h4>
-      <div class="quota-box">
-        <div><strong>Quota</strong> used: <span id="quota-used"></span> / remaining: <span id="quota-remaining"></span></div>
-        <div class="muted">reset: <span id="quota-reset"></span> <span id="quota-note"></span></div>
-      </div>
-    </div>
-
-    <div class="mt-2 d-flex align-items-center flex-wrap">
-      <button id="toggleSearchBtn" class="btn btn-sm btn-outline-primary" type="button"
-              data-toggle="collapse" data-target="#searchPanel"
-              aria-expanded="false" aria-controls="searchPanel">
-        検索フォームを開く / 閉じる
-      </button>
-
-      <span class="ml-2 small muted">
-        検索結果: <strong>{{ sorce | length }}</strong> 件
-      </span>
-      <div class="small text-muted">
-        DEBUG share_sid={{ share_sid|default('<<UNDEFINED>>') }} /
-          len={{ sorce|length }} /
-          first_error={{ (sorce[0].get('error') if sorce and sorce[0] is mapping else '') }}
-      </div>
-
-
-      {% if share_sid and sorce and (sorce | length) > 0 %}
-        <a class="btn btn-sm btn-success ml-2"
-           href="/share_image?sid={{ share_sid }}&n=12&cols=3&w=1600"
-           target="_blank" rel="noopener noreferrer">
-          X用まとめ画像（表示）
-        </a>
-        <a class="btn btn-sm btn-outline-success ml-1"
-           href="/share_image?sid={{ share_sid }}&n=12&cols=3&w=1600&download=1">
-          PNG保存
-        </a>
-      {% endif %}
-    </div>
-  </div>
-
-  <div id="searchPanel" class="collapse {% if not sorce %}show{% endif %} mt-3">
-    <div class="card">
-      <div class="card-body">
-
-        <form method="GET" action="/scraping">
-          <div class="form-row">
-            <div class="form-group col-md-4">
-              <label>検索ワード</label>
-              <input type="text" class="form-control" name="word" value="{{ form.word }}">
-            </div>
-
-            <div class="form-group col-md-2">
-              <label>from</label>
-              <input type="date" class="form-control" name="from" value="{{ form.from }}">
-            </div>
-
-            <div class="form-group col-md-2">
-              <label>to</label>
-              <input type="date" class="form-control" name="to" value="{{ form.to }}">
-            </div>
-
-            <div class="form-group col-md-2">
-              <label>取得件数</label>
-              <input type="number" class="form-control" name="video-count" value="{{ form.video_count }}">
-            </div>
-
-            <div class="form-group col-md-2">
-              <label>並び順</label>
-              <select class="form-control" name="order">
-                <option value="date" {% if form.order == "date" %}selected{% endif %}>新しい順</option>
-                <option value="viewcount" {% if form.order == "viewcount" %}selected{% endif %}>再生数順</option>
-                <option value="relevance" {% if form.order == "relevance" %}selected{% endif %}>関連度</option>
-              </select>
-            </div>
+      <form method="GET" action="/scraping" class="border rounded p-2 mb-3">
+        <div class="form-row">
+          <div class="col-md-3 mb-2">
+            <label class="small mb-1">検索ワード</label>
+            <input type="text" class="form-control" name="word" value="{{ form.word|default('') }}">
           </div>
-
-          <div class="form-row">
-            <div class="form-group col-md-6">
-              <label>チャンネルID / URL（任意）</label>
-              <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id }}">
-              <div class="small muted">例: UCxxxx / https://www.youtube.com/@xxxx</div>
-            </div>
-
-            <div class="form-group col-md-3">
-              <label>再生数下限</label>
-              <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min }}">
-            </div>
-
-            <div class="form-group col-md-3">
-              <label>再生数上限</label>
-              <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max }}">
-            </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">from</label>
+            <input type="date" class="form-control" name="from" value="{{ form.from|default('') }}">
           </div>
-
-          <div class="form-row">
-            <div class="form-group col-md-3">
-              <label>登録者数下限</label>
-              <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min }}">
-            </div>
-
-            <div class="form-group col-md-3">
-              <label>登録者数上限</label>
-              <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max }}">
-            </div>
-
-            <div class="form-group col-md-6 d-flex align-items-end justify-content-end">
-              <button type="submit" class="btn btn-primary">出力</button>
-            </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">to</label>
+            <input type="date" class="form-control" name="to" value="{{ form.to|default('') }}">
           </div>
-        </form>
+          <div class="col-md-3 mb-2">
+            <label class="small mb-1">チャンネルID / URL</label>
+            <input type="text" class="form-control" name="channel-id" value="{{ form.channel_id|default('') }}">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">取得件数</label>
+            <input type="number" class="form-control" name="video-count" value="{{ form.video_count|default('200') }}">
+          </div>
+        </div>
 
-        <hr>
+        <div class="form-row">
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">再生数 下限</label>
+            <input type="number" class="form-control" name="viewcount-level" value="{{ form.viewcount_min|default('') }}">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">再生数 上限</label>
+            <input type="number" class="form-control" name="viewcount-max" value="{{ form.viewcount_max|default('') }}">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">登録者 下限</label>
+            <input type="number" class="form-control" name="subscribercount-level" value="{{ form.sub_min|default('') }}">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">登録者 上限</label>
+            <input type="number" class="form-control" name="subscribercount-max" value="{{ form.sub_max|default('') }}">
+          </div>
+          <div class="col-md-2 mb-2">
+            <label class="small mb-1">並び順</label>
+            <select class="form-control" name="order">
+              <option value="date" {% if form.order|default('date') == 'date' %}selected{% endif %}>新しい順</option>
+              <option value="viewcount" {% if form.order|default('date') == 'viewcount' %}selected{% endif %}>再生数順</option>
+            </select>
+          </div>
+          <div class="col-md-2 mb-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary btn-block">検索</button>
+          </div>
+        </div>
 
-        <form method="GET" action="/comment" class="form-inline">
-          <label class="mr-2">動画URL / ID（コメント表示）</label>
-          <input type="text" class="form-control mr-2" name="video-id" style="min-width:420px;">
-          <button type="submit" class="btn btn-outline-secondary">コメント表示</button>
-        </form>
+        <div class="small-muted">DEBUG share_sid={{ share_sid|default('') }}</div>
+      </form>
+    </details>
 
-      </div>
-    </div>
-  </div>
+    <div class="card-body p-0">
+      <div class="p-2">検索結果: {{ sorce | length }}件</div>
 
-  <div class="mt-3">
-    {% set cols = [
-      'publishedAt',
-      'title',
-      'description',
-      'viewCount',
-      'likeCount',
-      'commentCount',
-      'videoDuration',
-      'thumbnails',
-      'video_url',
-      'name',
-      'subscriberCount',
-      'channel_icon'
-    ] %}
+      {% set cols = [
+        'publishedAt',
+        'title',
+        'description',
+        'viewCount',
+        'likeCount',
+        'commentCount',
+        'videoDuration',
+        'thumbnails',
+        'video_url',
+        'name',
+        'subscriberCount',
+        'channel_icon'
+      ] %}
 
-    <table id="fav-table" class="table table-bordered table-sm">
-      <thead>
-        <tr>
-          <th class="nowrap">投稿日時</th>
-          <th>タイトル</th>
-          <th>概要</th>
-          <th class="nowrap">再生数</th>
-          <th class="nowrap">高評価数</th>
-          <th class="nowrap">コメント数</th>
-          <th class="nowrap">動画時間</th>
-          <th class="nowrap">サムネ</th>
-          <th class="nowrap">URL</th>
-          <th class="nowrap">チャンネル名</th>
-          <th class="nowrap">登録者数</th>
-          <th class="nowrap">チャンネル</th>
-        </tr>
-      </thead>
-
-      <tbody>
-      {% for row in sorce %}
-        {% if row.get('error') %}
-          <tr class="error-row">
-            <td colspan="12"><strong>ERROR:</strong> {{ row.get('error') }}</td>
-          </tr>
-        {% else %}
+      <table id="fav-table" class="table table-bordered table-sm">
+        <thead>
           <tr>
-            {% for key in cols %}
-
-              {% if key == 'publishedAt' %}
-                {% set v = row.get(key, '') %}
-                <td class="nowrap" data-sort-value="{{ v }}">{{ v }}</td>
-
-              {% elif key in ['viewCount','likeCount','commentCount','subscriberCount'] %}
-                {% set val = (row.get(key, 0) | int) %}
-                <td class="nowrap" data-sort-value="{{ val }}">
-                  {% if key == 'commentCount' %}
-                    <a href="/comment?video-id={{ row.get('video_url','') }}" target="_blank" rel="noopener noreferrer">
-                      {{ "{:,}".format(val) }}
-                    </a>
-                  {% else %}
-                    {{ "{:,}".format(val) }}
-                  {% endif %}
-                </td>
-
-              {% elif key == 'thumbnails' %}
-                {% set u = row.get(key, '') %}
-                <td class="thumb">
-                  {% if u %}
-                    <a href="{{ u }}" target="_blank" rel="noopener noreferrer">
-                      <img src="{{ u }}" height="90" alt="thumb">
-                    </a>
-                  {% endif %}
-                </td>
-
-              {% elif key == 'channel_icon' %}
-                {% set ci = row.get('channel_icon', []) %}
-                <td class="thumb">
-                  {% if ci and ci|length >= 2 %}
-                    <a href="{{ ci[0] }}" target="_blank" rel="noopener noreferrer">
-                      <img src="{{ ci[1] }}" height="60" alt="channel">
-                    </a>
-                  {% endif %}
-                </td>
-
-              {% elif key == 'video_url' %}
-                <td class="nowrap">
-                  <div class="js-text text-content">{{- (row.get(key,'') ) | e -}}</div>
-                </td>
-
-              {% else %}
-                <td>
-                  <div class="js-text text-content">{{- (row.get(key,'') ) | e -}}</div>
-                </td>
-
-              {% endif %}
-            {% endfor %}
+            <th>投稿日時</th>
+            <th>タイトル</th>
+            <th>概要</th>
+            <th>再生数</th>
+            <th>高評価数</th>
+            <th>コメント数</th>
+            <th>動画時間</th>
+            <th>サムネ</th>
+            <th>URL</th>
+            <th>チャンネル名</th>
+            <th>登録者数</th>
+            <th>チャンネル</th>
           </tr>
-        {% endif %}
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+        </thead>
+        <tbody>
+        {% for row in sorce %}
+          <tr>
+            <td class="nowrap">{{ row.get('publishedAt','') }}</td>
+            <td><div class="text-content">{{ row.get('title','')|safe }}</div></td>
+            <td><div class="text-content">{{ row.get('description','')|safe }}</div></td>
+            <td class="nowrap" data-sort-value="{{ row.get('viewCount',0)|int }}">{{ "{:,}".format(row.get('viewCount',0)|int) }}</td>
+            <td class="nowrap" data-sort-value="{{ row.get('likeCount',0)|int }}">{{ "{:,}".format(row.get('likeCount',0)|int) }}</td>
+            <td class="nowrap" data-sort-value="{{ row.get('commentCount',0)|int }}">
+              {% set vurl = row.get('video_url','') %}
+              <a href="/comment?video-id={{ vurl }}" target="_blank" rel="noopener">{{ "{:,}".format(row.get('commentCount',0)|int) }}</a>
+            </td>
+            <td class="nowrap">{{ row.get('videoDuration','') }}</td>
+            <td class="nowrap">
+              {% set th = row.get('thumbnails','') %}
+              {% if th %}
+              <a href="{{ th }}" target="_blank" rel="noopener"><img src="{{ th }}" height="60"></a>
+              {% endif %}
+            </td>
+            <td><div class="text-content">{{ row.get('video_url','')|safe }}</div></td>
+            <td class="nowrap">{{ row.get('name','') }}</td>
+            <td class="nowrap" data-sort-value="{{ row.get('subscriberCount',0)|int }}">{{ "{:,}".format(row.get('subscriberCount',0)|int) }}</td>
+            <td class="nowrap">
+              {% set ch = row.get('channel_icon', []) %}
+              {% if ch and ch|length >= 1 %}
+                <a href="{{ ch[0] }}" target="_blank" rel="noopener">link</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
 
+    {% if share_sid and (sorce|length) > 0 %}
+    <hr>
+    <div id="share-panel" class="card p-3"
+         data-sid="{{ share_sid }}"
+         data-total="{{ sorce|length }}">
+      <div class="d-flex align-items-center justify-content-between">
+        <h5 class="mb-2">X用まとめ画像</h5>
+        <div class="small-muted">合計 {{ sorce|length }} 件</div>
+      </div>
+
+      <div class="form-row">
+        <div class="col-auto">
+          <label class="small mb-1">対象件数 n</label>
+          <input id="share-n" type="number" class="form-control form-control-sm"
+                 min="1" max="{{ sorce|length }}"
+                 value="{{ 36 if (sorce|length) >= 36 else (sorce|length) }}">
+        </div>
+
+        <div class="col-auto">
+          <label class="small mb-1">推奨基準</label>
+          <select id="share-target" class="form-control form-control-sm">
+            <option value="1.7777777778">16:9（見切れにくい）</option>
+            <option value="1.91">1.91:1（横長）</option>
+            <option value="0.8">4:5（縦長）</option>
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="small mb-1">出力幅</label>
+          <select id="share-w" class="form-control form-control-sm">
+            <option value="1600">1600px</option>
+            <option value="1200">1200px</option>
+            <option value="2000">2000px</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <div class="small-muted mb-1">行×列（約数候補）</div>
+        <div id="share-grid-list" class="grid-btns"></div>
+        <div id="share-reco" class="small-muted mt-2"></div>
+      </div>
+
+      <div class="mt-3">
+        <a id="share-open" class="btn btn-sm btn-primary" href="#" target="_blank" rel="noopener">画像を開く</a>
+      </div>
+
+      <div class="mt-2">
+        <img id="share-preview" class="preview-img" alt="preview">
+      </div>
+    </div>
+
+    <script>
+    (function(){
+      const panel = document.getElementById("share-panel");
+      if(!panel) return;
+
+      const sid = panel.dataset.sid;
+      const total = parseInt(panel.dataset.total, 10) || 0;
+
+      const nInput = document.getElementById("share-n");
+      const targetSel = document.getElementById("share-target");
+      const wSel = document.getElementById("share-w");
+      const list = document.getElementById("share-grid-list");
+      const reco = document.getElementById("share-reco");
+      const preview = document.getElementById("share-preview");
+      const openBtn = document.getElementById("share-open");
+
+      // thumbs are 16:9
+      const CELL_RATIO = 16/9;
+
+      function exactPairs(n){
+        const pairs = [];
+        for(let r=1; r<=Math.floor(Math.sqrt(n)); r++){
+          if(n % r === 0){
+            const c = n / r;
+            pairs.push([r,c]);
+            if(r !== c) pairs.push([c,r]);
+          }
+        }
+        pairs.sort((a,b)=>a[0]-b[0] || a[1]-b[1]);
+        return pairs;
+      }
+
+      function approxPairs(n){
+        const out = [];
+        const seen = new Set();
+        const maxR = Math.min(n, 24);
+        for(let r=1; r<=maxR; r++){
+          const c = Math.ceil(n / r);
+          const key = r + "x" + c;
+          if(!seen.has(key)){
+            seen.add(key);
+            out.push([r,c]);
+          }
+        }
+        return out;
+      }
+
+      function overallRatio(rows, cols){
+        return (cols/rows) * CELL_RATIO;
+      }
+
+      function bestPair(pairs, target){
+        let best = null;
+        let bestScore = 1e18;
+        for(const [r,c] of pairs){
+          const ratio = overallRatio(r,c);
+          const score = Math.abs(Math.log(ratio / target));
+          if(score < bestScore){
+            bestScore = score;
+            best = [r,c,ratio];
+          }
+        }
+        return best;
+      }
+
+      function setPreview(r, c, n, w){
+        const url = `/share_image?sid=${encodeURIComponent(sid)}&rows=${r}&cols=${c}&n=${n}&w=${w}`;
+        openBtn.href = url;
+        preview.src = url;
+        preview.scrollIntoView({behavior:"smooth", block:"start"});
+      }
+
+      function render(){
+        let n = parseInt(nInput.value, 10) || 1;
+        n = Math.max(1, Math.min(n, total));
+        nInput.value = n;
+
+        const target = parseFloat(targetSel.value);
+        const w = parseInt(wSel.value, 10) || 1600;
+
+        let pairs = exactPairs(n);
+        let approx = false;
+        if(pairs.length <= 2 && n > 12){
+          pairs = approxPairs(n);
+          approx = true;
+        }
+
+        const best = bestPair(pairs, target);
+
+        list.innerHTML = "";
+        reco.textContent = best
+          ? `おすすめ: ${best[0]}×${best[1]}（推定 全体比率 ${best[2].toFixed(2)}:1）${approx ? " ※近似候補含む" : ""}`
+          : "";
+
+        pairs.forEach(([r,c])=>{
+          const ratio = overallRatio(r,c);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn btn-sm " + (best && r===best[0] && c===best[1] ? "btn-success" : "btn-outline-secondary");
+          btn.textContent = `${r}×${c}`;
+          btn.title = `推定比率 ${ratio.toFixed(2)}:1`;
+          btn.addEventListener("click", ()=> setPreview(r,c,n,w));
+          list.appendChild(btn);
+        });
+
+        if(best) setPreview(best[0], best[1], n, w);
+      }
+
+      nInput.addEventListener("change", render);
+      targetSel.addEventListener("change", render);
+      wSel.addEventListener("change", render);
+      render();
+    })();
+    </script>
+    {% endif %}
+  </div>
 </body>
 </html>
