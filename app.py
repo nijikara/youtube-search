@@ -371,6 +371,16 @@ def _paste_contain(canvas: Image.Image, img: Image.Image, x: int, y: int, w: int
     iy = y + (h - nh) // 2
     canvas.paste(img.resize((nw, nh), Image.LANCZOS), (ix, iy))
 
+
+
+def _paste_native(canvas, img, x: int, y: int, w: int, h: int):
+    """原寸優先で貼る。枠より大きい場合のみ縮小（contain）。"""
+    if img.width > w or img.height > h:
+        return _paste_contain(canvas, img, x, y, w, h)
+    ix = x + (w - img.width) // 2
+    iy = y + (h - img.height) // 2
+    canvas.paste(img, (ix, iy))
+
 @app.get("/share_image", strict_slashes=False)
 async def share_image():
     """
@@ -394,17 +404,21 @@ async def share_image():
 
     show_title = (request.args.get("show_title", "1") or "1").strip() != "0"
     show_channel = (request.args.get("show_channel", "0") or "0").strip() != "0"
+    size_mode = (request.args.get("size_mode", "fit") or "fit").strip().lower()
+    if size_mode not in ("fit", "native"):
+        size_mode = "native" if size_mode in ("1", "true", "orig", "original") else "fit"
+
 
     try:
         out_w = int(request.args.get("w", "1200"))
     except Exception:
         out_w = 1200
-    out_w = max(600, min(out_w, 6000))
+    out_w = max(600, min(out_w, 6000 if size_mode == "fit" else 32000))
 
     try:
-        gap = int(request.args.get("gap", "8"))
+        gap = int(request.args.get("gap", "4"))
     except Exception:
-        gap = 8
+        gap = 4
     gap = max(0, min(gap, 50))
 
     items_all: List[Dict[str, Any]] = SHARE_CACHE[sid].get("items", []) or []
@@ -445,33 +459,29 @@ async def share_image():
     if rows * cols < n:
         cols = int(math.ceil(n / rows))
 
-    # Layout
-    pad = 14
-    cell_w = int((out_w - pad * 2 - gap * (cols - 1)) / cols)
-    cell_w = max(160, cell_w)
+        # Layout
+        pad = 14
+        if show_title and show_channel:
+            meta_h = 38
+        elif show_title or show_channel:
+            meta_h = 24
+        else:
+            meta_h = 0
 
-    # Thumb aspect: normal=16:9, shorts=9:16
-    if kind == "shorts":
-        thumb_h = int(cell_w * 16 / 9)  # vertical
-    else:
-        thumb_h = int(cell_w * 9 / 16)  # horizontal
+        if size_mode == "fit":
+            # out_w の幅に収まるように縮小して並べる
+            cell_w = int((out_w - pad * 2 - gap * (cols - 1)) / cols)
+            cell_w = max(160, cell_w)
+            if kind == "shorts":
+                thumb_h = int(cell_w * (16 / 9))
+            else:
+                thumb_h = int(cell_w * (9 / 16))
+        else:
+            # native は後段でサムネの実寸から決め直す（仮置き）
+            cell_w = 480
+            thumb_h = 360
 
-    # Text area
-    line_h = 26
-    title_lines = 2 if show_title else 0
-    channel_lines = 1 if show_channel else 0
-    text_h = 0
-    if show_title:
-        text_h += title_lines * line_h
-    if show_channel:
-        text_h += channel_lines * line_h
-    text_h += 16 if (show_title or show_channel) else 0  # padding
-
-    cell_h = thumb_h + text_h
-    out_h = pad * 2 + rows * cell_h + gap * (rows - 1)
-
-    canvas = Image.new("RGB", (out_w, out_h), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+        # cell_h/out_h/canvas はサムネ取得後に確定する
 
     # Fonts
     f_title = _load_font(22)
@@ -494,6 +504,37 @@ async def share_image():
 
         thumbs = await asyncio_gather_limit([it["thumb"] for it in items[:n]], fetch_img, limit=10)
 
+        # shorts は左右黒帯を軽くトリム（サイジング/貼り付け用）
+
+        if size_mode == "native":
+            sizes = [(t.width, t.height) for t in thumbs if t is not None]
+            if sizes:
+                ws = sorted(w for w, _ in sizes)
+                hs = sorted(h for _, h in sizes)
+                cell_w = int(ws[len(ws)//2])
+                thumb_h = int(hs[len(hs)//2])
+                out_w = pad * 2 + cols * cell_w + gap * (cols - 1)
+                max_dim = 32000
+                if out_w > max_dim:
+                    scale = out_w / max_dim
+                    cell_w = max(160, int(cell_w / scale))
+                    thumb_h = max(80, int(thumb_h / scale))
+                    out_w = pad * 2 + cols * cell_w + gap * (cols - 1)
+            else:
+                size_mode = "fit"
+                cell_w = int((out_w - pad * 2 - gap * (cols - 1)) / cols)
+                cell_w = max(160, cell_w)
+                if kind == "shorts":
+                    thumb_h = int(cell_w * (16 / 9))
+                else:
+                    thumb_h = int(cell_w * (9 / 16))
+
+        cell_h = thumb_h + meta_h
+        out_h = pad * 2 + rows * cell_h + gap * (rows - 1)
+        canvas = Image.new("RGB", (out_w, out_h), "white")
+        draw = ImageDraw.Draw(canvas)
+
+
 
     # Draw cards
     for idx in range(n):
@@ -513,9 +554,7 @@ async def share_image():
             # placeholder
             draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], fill=(240, 240, 240))
         else:
-            if kind == "shorts":
-                img = _trim_side_black_bars(img)
-            _paste_contain(canvas, img, x0, y0, cell_w, thumb_h)
+            _paste_native(canvas, img, x0, y0, cell_w, thumb_h) if size_mode == "native" else _paste_contain(canvas, img, x0, y0, cell_w, thumb_h)
 
         cur_y = y0 + thumb_h + 8
 
