@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
         integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
@@ -12,173 +13,98 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/js/jquery.tablesorter.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.0/css/theme.default.min.css">
 
-  <script id="quota-json" type="application/json">{{ quota | tojson }}</script>
-
   <style>
-    body { padding: 16px; }
-    .header { display:flex; gap:12px; align-items:center; }
-    .thumb { width: 160px; }
-    .thumb img { width: 160px; border-radius: 10px; }
-    .meta { flex:1; }
-    .title { font-size: 18px; font-weight: 700; line-height: 1.25; }
-    .muted { color:#666; }
-    .quota-box { background:#f7f7f7; border-radius:10px; padding:10px 12px; font-size:12px; }
-    #comment-table th { background-color: #b8f3ff; }
-    .comment-text { white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
+    body { background:#fafafa; }
+    .card { border-radius: 14px; }
+    .comment-text { white-space: pre-wrap; }
     .nowrap { white-space: nowrap; }
-    .icon img { border-radius: 50%; }
-    .small { font-size: 12px; }
   </style>
 
   <script>
-    function fmt(n){
-      const x = Number(n);
-      if (!Number.isFinite(x)) return String(n ?? "");
-      return new Intl.NumberFormat("ja-JP").format(x);
-    }
-
     $(function(){
-      try{
-        const q = JSON.parse(document.getElementById("quota-json").textContent || "{}");
-        $("#quota-used").text(fmt(q.used_estimate ?? 0));
-        $("#quota-remaining").text(fmt(q.remaining_estimate ?? ""));
-        $("#quota-reset").text(String(q.reset_at_jst ?? ""));
-      }catch(e){}
-
-      $("#comment-table").tablesorter({
-        theme: "default",
-        textExtraction: function(node){
-          const v = $(node).attr("data-sort-value");
-          return (v !== undefined && v !== null) ? v : $(node).text();
-        },
-        headers: {
-          0: { sorter: "digit" }, // No
-          1: { sorter: "digit" }, // 投稿日 (epoch)
-          3: { sorter: "digit" }, // Like
-          4: { sorter: "digit" }  // Reply
-        }
-      });
+      $('#comment-table').tablesorter();
     });
   </script>
 </head>
 
 <body>
-
-  <div class="d-flex justify-content-between align-items-start mb-3">
-    <div class="header">
-      <div class="thumb">
-        {% if video_thumb %}
-          <a href="{{ watch_url }}" target="_blank" rel="noopener noreferrer">
-            <img src="{{ video_thumb }}" alt="thumb">
-          </a>
-        {% endif %}
-      </div>
-      <div class="meta">
-        <div class="title">
-          <a href="{{ watch_url }}" target="_blank" rel="noopener noreferrer">
-            {{ video_title if video_title else "YouTube コメント" }}
-          </a>
+  <div class="container py-3">
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex align-items-start">
+          {% if video_thumb %}
+            <a href="{{ watch_url }}" target="_blank">
+              <img src="{{ video_thumb }}" height="90" style="border-radius:10px;">
+            </a>
+          {% endif %}
+          <div class="ml-3">
+            <div class="h5 mb-1"><a href="{{ watch_url }}" target="_blank">{{ video_title or watch_url }}</a></div>
+            <div class="text-muted">{{ channel_title }}</div>
+          </div>
         </div>
-        {% if channel_title %}
-          <div class="muted">{{ channel_title }}</div>
+
+        {% if error %}
+          <div class="alert alert-danger mt-3">{{ error }}</div>
         {% endif %}
-        <div class="small muted">
+
+        <div class="mt-3">
           {% if mode == "replies" %}
-            返信一覧（最大500件）
-            <a href="/comment?video-id={{ video_id }}" class="ml-2">← トップへ戻る</a>
-          {% else %}
-            トップコメント（最大500件）
+            <a class="btn btn-sm btn-outline-secondary" href="/comment?video-id={{ video_id }}">← トップコメントへ</a>
+          {% endif %}
+
+          {% if next_page_token %}
+            {% if mode == "replies" %}
+              <a class="btn btn-sm btn-outline-primary" href="/comment?video-id={{ video_id }}&mode=replies&parent-id={{ parent_id }}&pageToken={{ next_page_token }}">次ページ</a>
+            {% else %}
+              <a class="btn btn-sm btn-outline-primary" href="/comment?video-id={{ video_id }}&pageToken={{ next_page_token }}">次ページ</a>
+            {% endif %}
           {% endif %}
         </div>
       </div>
     </div>
 
-    <div class="quota-box">
-      <div><strong>Quota</strong> used: <span id="quota-used"></span> / remaining: <span id="quota-remaining"></span></div>
-      <div class="muted">reset: <span id="quota-reset"></span></div>
+    <div class="card">
+      <div class="card-body p-2">
+        <table id="comment-table" class="table table-bordered table-sm tablesorter mb-0">
+          <thead class="thead-light">
+            <tr>
+              <th class="nowrap">No</th>
+              <th class="nowrap">投稿日時</th>
+              <th>コメント</th>
+              <th class="nowrap">Like</th>
+              <th class="nowrap">リプライ</th>
+              <th class="nowrap">ユーザーID</th>
+              <th class="nowrap">URL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td class="nowrap" data-sort-value="{{ r.no }}">{{ r.no }}</td>
+                <td class="nowrap" data-sort-value="{{ r.publishedAtIso }}">{{ r.publishedAt }}</td>
+                <td><div class="comment-text">{{ r.text }}</div></td>
+                <td class="nowrap" data-sort-value="{{ r.likeCount|int }}">{{ "{:,}".format(r.likeCount|int) }}</td>
+                <td class="nowrap" data-sort-value="{{ r.replyCount|int }}">
+                  {% if mode != "replies" and (r.replyCount|int) > 0 %}
+                    <a href="/comment?video-id={{ video_id }}&mode=replies&parent-id={{ r.parentId }}">{{ "{:,}".format(r.replyCount|int) }}</a>
+                  {% else %}
+                    {{ "{:,}".format(r.replyCount|int) }}
+                  {% endif %}
+                </td>
+                <td class="nowrap">
+                  {% if r.authorChannelUrl %}
+                    <a href="{{ r.authorChannelUrl }}" target="_blank">{{ r.userId }}</a>
+                  {% else %}
+                    {{ r.userId }}
+                  {% endif %}
+                </td>
+                <td class="nowrap"><a href="{{ r.commentUrl }}" target="_blank">open</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
-
-  {% if error %}
-    <div class="alert alert-warning">{{ error }}</div>
-  {% endif %}
-
-  <table id="comment-table" class="table table-bordered table-sm">
-    <thead>
-      <tr>
-        <th class="nowrap">No</th>
-        <th class="nowrap">投稿日</th>
-        <th>コメント</th>
-        <th class="nowrap">Like</th>
-        <th class="nowrap">リプ</th>
-        <th class="nowrap">ユーザーID</th>
-        <th class="nowrap">icon</th>
-        <th class="nowrap">URL</th>
-      </tr>
-    </thead>
-
-    <tbody>
-      {% for row in rows %}
-        <tr>
-          <td class="nowrap" data-sort-value="{{ row.get('no','0')|int }}">{{ row.get('no','') }}</td>
-
-          <td class="nowrap" data-sort-value="{{ row.get('publishedAtEpoch',0)|int }}">
-            {{ row.get('publishedAt','') }}
-          </td>
-
-          <td><div class="comment-text">{{- row.get('text','') | e -}}</div></td>
-
-          <td class="nowrap" data-sort-value="{{ row.get('likeCount',0)|int }}">
-            {{ "{:,}".format(row.get('likeCount',0)|int) }}
-          </td>
-
-          <td class="nowrap" data-sort-value="{{ row.get('replyCount',0)|int }}">
-            {% if mode != "replies" and row.get('replyCount',0)|int > 0 and row.get('repliesUrl','') %}
-              <a href="{{ row.get('repliesUrl','') }}">{{ "{:,}".format(row.get('replyCount',0)|int) }}</a>
-            {% else %}
-              {{ "{:,}".format(row.get('replyCount',0)|int) }}
-            {% endif %}
-          </td>
-
-          <td class="nowrap">
-            {% if row.get('authorChannelUrl','') %}
-              <a href="{{ row.get('authorChannelUrl','') }}" target="_blank" rel="noopener noreferrer">
-                {{ row.get('userId','') }}
-              </a>
-            {% else %}
-              {{ row.get('userId','') }}
-            {% endif %}
-          </td>
-
-          <td class="icon nowrap">
-            {% if row.get('iconUrl','') %}
-              <img src="{{ row.get('iconUrl','') }}" height="34" alt="icon">
-            {% endif %}
-          </td>
-
-          <td class="nowrap">
-            <a href="{{ row.get('commentUrl','') }}" target="_blank" rel="noopener noreferrer">open</a>
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-
-  {% if next_page_token %}
-    <div class="mt-2">
-      {% if mode == "replies" %}
-        <a class="btn btn-outline-primary btn-sm"
-           href="/comment?video-id={{ video_id }}&mode=replies&parent-id={{ parent_id }}&pageToken={{ next_page_token }}">
-          次へ →
-        </a>
-      {% else %}
-        <a class="btn btn-outline-primary btn-sm"
-           href="/comment?video-id={{ video_id }}&pageToken={{ next_page_token }}">
-          次へ →
-        </a>
-      {% endif %}
-    </div>
-  {% endif %}
-
 </body>
 </html>
