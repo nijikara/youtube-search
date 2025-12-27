@@ -33,6 +33,7 @@ JST = timezone(timedelta(hours=9))
 SEARCH_CACHE: dict[tuple, tuple[float, list]] = {}
 SEARCH_CACHE_TTL_SEC = 600  # 10 minutes
 
+# share_sid -> minimal list for image generation
 SHARE_CACHE: dict[str, tuple[float, list[dict]]] = {}
 SHARE_TTL_SEC = 60 * 60  # 1 hour
 
@@ -129,9 +130,19 @@ def extract_video_id(s: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _is_short_url(url: str) -> bool:
+    u = (url or "").lower()
+    return "/shorts/" in u
+
+
 def build_share_items(sorce: list[dict], limit: int = 500) -> list[dict]:
     """
-    X用まとめ画像に必要な最低限だけ保持（サムネURL + タイトル + チャンネル名）
+    X用まとめ画像に必要な最低限だけ保持
+    - thumb: サムネURL
+    - title: 動画タイトル
+    - channel: チャンネル名
+    - url: 動画URL（/shorts/ か watch?v= かも含む）
+    - is_short: bool
     """
     items: list[dict] = []
     for row in (sorce or [])[:max(1, int(limit))]:
@@ -141,107 +152,23 @@ def build_share_items(sorce: list[dict], limit: int = 500) -> list[dict]:
         title = row.get("title") or ""
         url = row.get("video_url") or row.get("videoUrl") or ""
         ch = row.get("name") or ""
-        items.append({"thumb": thumb, "title": title, "url": url, "channel": ch})
+        items.append({"thumb": thumb, "title": title, "url": url, "channel": ch, "is_short": _is_short_url(url)})
     return items
 
 
-# ------------------------------------------------------------
-# Routes
-# ------------------------------------------------------------
-@app.get("/", strict_slashes=False)
-async def home():
-    return await render_template(
-        "index.html",
-        title="search_youtube",
-        sorce=[],
-        form=default_form(),
-        share_sid="",
-        font_hint=_font_hint_message(),
-    )
-
-
-@app.get("/scraping", strict_slashes=False)
-async def scraping():
-    word = request.args.get("word", "")
-    from_date = request.args.get("from", "")
-    to_date = request.args.get("to", "")
-    channel_id = request.args.get("channel-id", "")
-
-    viewcount_min = request.args.get("viewcount-level", "")
-    viewcount_max = request.args.get("viewcount-max", "")
-    sub_min = request.args.get("subscribercount-level", "")
-    sub_max = request.args.get("subscribercount-max", "")
-    video_count = request.args.get("video-count", "200")
-    order = request.args.get("order", "date")
-
-    cache_key = (
-        word, from_date, to_date, channel_id,
-        viewcount_min, viewcount_max, sub_min, sub_max,
-        video_count, order
-    )
-
-    sorce = _cache_get(SEARCH_CACHE, cache_key, SEARCH_CACHE_TTL_SEC)
-    if sorce is None:
-        # Search adapter: try "newer" keyword-args signature, then fall back to old positional
-        try:
-            sorce = await search_youtube.search_youtube(
-                channel_id_input=channel_id,
-                key_word=word,
-                published_from=from_date,
-                published_to=to_date,
-                viewcount_min=viewcount_min,
-                subscribercount_min=sub_min,
-                video_count=video_count,
-                viewcount_max=viewcount_max,
-                subscribercount_max=sub_max,
-                order=order,
-            )
-        except TypeError:
-            # Old signature (example): (channel_id, key_word, published_from, published_to, viewcount_level, subscribercount_level, video_count, is_get_comment)
-            sorce = await search_youtube.search_youtube(
-                channel_id, word, from_date, to_date, viewcount_min, sub_min, video_count, False
-            )
-        _cache_set(SEARCH_CACHE, cache_key, sorce)
-
-    # share sid for X-image
-    sid = new_share_sid()
-    SHARE_CACHE[sid] = (time.time(), build_share_items(sorce if isinstance(sorce, list) else [], limit=500))
-
-    form = {
-        "word": word,
-        "from": from_date,
-        "to": to_date,
-        "channel_id": channel_id,
-        "order": order,
-        "viewcount_min": viewcount_min,
-        "viewcount_max": viewcount_max,
-        "sub_min": sub_min,
-        "sub_max": sub_max,
-        "video_count": video_count,
-    }
-
-    print("DEBUG share_sid:", sid, "results:", (len(sorce) if isinstance(sorce, list) else type(sorce)))
-    return await render_template(
-        "index.html",
-        title="search_youtube",
-        sorce=sorce if isinstance(sorce, list) else [],
-        form=form,
-        share_sid=sid,
-        font_hint=_font_hint_message(),
-    )
+def share_counts(items: list[dict]) -> dict:
+    n_short = sum(1 for it in items if it.get("is_short"))
+    n_norm = len(items) - n_short
+    return {"total": len(items), "normal": n_norm, "short": n_short}
 
 
 # ------------------------------------------------------------
-# X share image
-#   /share_image?sid=...&rows=6&cols=6&n=36&w=1600
+# Fonts (Pillow)
 # ------------------------------------------------------------
 from PIL import Image, ImageDraw, ImageFont
 
 
 def _font_supports_jp(font) -> bool:
-    """
-    Quick check: if a Japanese glyph can't be rasterized, titles would appear as □□.
-    """
     try:
         m = font.getmask("あ")
         return (m.size[0] * m.size[1]) > 0
@@ -252,21 +179,23 @@ def _font_supports_jp(font) -> bool:
 def _font_hint_message() -> str:
     return (
         "まとめ画像の日本語が□になる場合："
-        "repo に fonts/NotoSansJP-Regular.otf を置くか、環境変数 FONT_PATH にフォントパスを設定してください。"
+        "repo に fonts/NotoSansJP-VariableFont_wght.ttf 等を置いて、"
+        "環境変数 FONT_PATH を fonts/NotoSansJP-VariableFont_wght.ttf（/区切り）または"
+        " /opt/render/project/src/fonts/... に設定してください。"
     )
 
 
 def _load_font(size: int):
     """
-    Prefer local repo font first to avoid □□ in Render.
-    Place: ./fonts/NotoSansJP-Regular.otf (recommended)
-    Or set env: FONT_PATH=/path/to/font.otf
+    Prefer env FONT_PATH -> repo fonts -> system fonts.
     """
+    base_dir = os.path.dirname(__file__)
     local_candidates = [
         os.environ.get("FONT_PATH", "").strip(),
-        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansJP-Regular.otf"),
-        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansJP-Regular.ttf"),
-        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansCJKjp-Regular.otf"),
+        os.path.join(base_dir, "fonts", "NotoSansJP-VariableFont_wght.ttf"),
+        os.path.join(base_dir, "fonts", "NotoSansJP-Regular.otf"),
+        os.path.join(base_dir, "fonts", "NotoSansJP-Regular.ttf"),
+        os.path.join(base_dir, "fonts", "NotoSansCJKjp-Regular.otf"),
     ]
     sys_candidates = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -278,8 +207,7 @@ def _load_font(size: int):
         if not p:
             continue
         try:
-            f = ImageFont.truetype(p, size=size)
-            return f
+            return ImageFont.truetype(p, size=size)
         except Exception:
             pass
     return ImageFont.load_default()
@@ -334,6 +262,111 @@ def _paste_thumb_contain(canvas: Image.Image, img: Image.Image, x: int, y: int, 
     canvas.paste(img, (ox, oy))
 
 
+def _parse_bool(v: str | None, default: bool = True) -> bool:
+    if v is None:
+        return default
+    s = str(v).strip().lower()
+    return s in ("1", "true", "on", "yes", "y")
+
+
+# ------------------------------------------------------------
+# Routes: Search pages
+# ------------------------------------------------------------
+@app.get("/", strict_slashes=False)
+async def home():
+    return await render_template(
+        "index.html",
+        title="search_youtube",
+        sorce=[],
+        form=default_form(),
+        share_sid="",
+        share_counts={"total": 0, "normal": 0, "short": 0},
+        font_hint=_font_hint_message(),
+    )
+
+
+@app.get("/scraping", strict_slashes=False)
+async def scraping():
+    word = request.args.get("word", "")
+    from_date = request.args.get("from", "")
+    to_date = request.args.get("to", "")
+    channel_id = request.args.get("channel-id", "")
+
+    viewcount_min = request.args.get("viewcount-level", "")
+    viewcount_max = request.args.get("viewcount-max", "")
+    sub_min = request.args.get("subscribercount-level", "")
+    sub_max = request.args.get("subscribercount-max", "")
+    video_count = request.args.get("video-count", "200")
+    order = request.args.get("order", "date")
+
+    cache_key = (
+        word, from_date, to_date, channel_id,
+        viewcount_min, viewcount_max, sub_min, sub_max,
+        video_count, order
+    )
+
+    sorce = _cache_get(SEARCH_CACHE, cache_key, SEARCH_CACHE_TTL_SEC)
+    if sorce is None:
+        try:
+            sorce = await search_youtube.search_youtube(
+                channel_id_input=channel_id,
+                key_word=word,
+                published_from=from_date,
+                published_to=to_date,
+                viewcount_min=viewcount_min,
+                subscribercount_min=sub_min,
+                video_count=video_count,
+                viewcount_max=viewcount_max,
+                subscribercount_max=sub_max,
+                order=order,
+            )
+        except TypeError:
+            sorce = await search_youtube.search_youtube(
+                channel_id, word, from_date, to_date, viewcount_min, sub_min, video_count, False
+            )
+        _cache_set(SEARCH_CACHE, cache_key, sorce)
+
+    sorce_list = sorce if isinstance(sorce, list) else []
+
+    # share sid for X-image
+    sid = new_share_sid()
+    items = build_share_items(sorce_list, limit=500)
+    SHARE_CACHE[sid] = (time.time(), items)
+
+    form = {
+        "word": word,
+        "from": from_date,
+        "to": to_date,
+        "channel_id": channel_id,
+        "order": order,
+        "viewcount_min": viewcount_min,
+        "viewcount_max": viewcount_max,
+        "sub_min": sub_min,
+        "sub_max": sub_max,
+        "video_count": video_count,
+    }
+
+    return await render_template(
+        "index.html",
+        title="search_youtube",
+        sorce=sorce_list,
+        form=form,
+        share_sid=sid,
+        share_counts=share_counts(items),
+        font_hint=_font_hint_message(),
+    )
+
+
+# ------------------------------------------------------------
+# X share image
+#   mixed:
+#     /share_image?sid=...&rows=6&cols=6&n=36&w=1600&show_title=1&show_channel=0
+#   separate:
+#     /share_image?sid=...&separate=1
+#       &rows_norm=4&cols_norm=4&n_norm=16
+#       &rows_short=3&cols_short=2&n_short=6
+#       &w=1600&show_title=1&show_channel=0
+# ------------------------------------------------------------
 @app.get("/share_image", strict_slashes=False)
 async def share_image():
     sid = (request.args.get("sid") or "").strip()
@@ -345,62 +378,148 @@ async def share_image():
         SHARE_CACHE.pop(sid, None)
         return Response("share cache expired", status=404)
 
-    rows = max(1, int(request.args.get("rows", "3") or 3))
-    cols = max(1, int(request.args.get("cols", "4") or 4))
-    n = int(request.args.get("n", str(rows * cols)) or (rows * cols))
-    n = max(1, min(n, len(items), rows * cols))
+    separate = _parse_bool(request.args.get("separate"), default=False)
+    show_title = _parse_bool(request.args.get("show_title"), default=True)
+    show_channel = _parse_bool(request.args.get("show_channel"), default=True)
+
     out_w = int(request.args.get("w", "1600") or 1600)
     out_w = max(800, min(out_w, 3000))
-
     pad = 16
-    title_h = 60
-    cell_w = (out_w - pad * (cols + 1)) // cols
-    thumb_h = int(cell_w * 9 / 16)
-    cell_h = thumb_h + title_h
-    out_h = pad * (rows + 1) + cell_h * rows
 
-    canvas = Image.new("RGB", (out_w, out_h), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+    # dynamic text area
+    title_lines = 2 if show_title else 0
+    channel_lines = 1 if show_channel else 0
+    line_h = 26
+    text_pad_top = 6
+    text_pad_bottom = 6
+    text_h = (title_lines + channel_lines) * line_h + (text_pad_top + text_pad_bottom if (title_lines + channel_lines) > 0 else 0)
+
     font = _load_font(22)
     font_small = _load_font(18)
     font_ok = _font_supports_jp(font)
 
-    target = items[:n]
-    async with aiohttp.ClientSession() as session:
-        blobs = await asyncio.gather(*[_fetch_image_bytes(session, it["thumb"]) for it in target])
+    async def render_section(section_items: list[dict], rows: int, cols: int, n: int, cell_ratio: float, heading: str | None):
+        """
+        cell_ratio = width/height of thumbnail area (16/9 for normal, 9/16 for shorts)
+        Returns: (Image, height)
+        """
+        if not section_items or n <= 0:
+            # minimal 1px image to simplify composition
+            img = Image.new("RGB", (out_w, 1), (255, 255, 255))
+            return img, 0
 
-    for i, it in enumerate(target):
-        r = i // cols
-        c = i % cols
-        x0 = pad + c * (cell_w + pad)
-        y0 = pad + r * (cell_h + pad)
+        rows = max(1, int(rows))
+        cols = max(1, int(cols))
+        n = max(1, min(int(n), len(section_items), rows * cols))
 
-        draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], outline=(230, 230, 230), width=1)
+        # layout
+        header_h = 44 if heading else 0
+        cell_w = (out_w - pad * (cols + 1)) // cols
+        thumb_h = int(cell_w / cell_ratio)  # height = width / (w/h)
+        cell_h = thumb_h + text_h
+        out_h = header_h + pad * (rows + 1) + cell_h * rows
 
-        b = blobs[i]
-        if b:
-            try:
-                img = Image.open(io.BytesIO(b))
-                _paste_thumb_contain(canvas, img, x0, y0, cell_w, thumb_h)
-            except Exception:
+        canvas = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+        draw = ImageDraw.Draw(canvas)
+
+        if heading:
+            draw.text((pad, 10), heading, fill=(20, 20, 20), font=font)
+
+        target = section_items[:n]
+        async with aiohttp.ClientSession() as session:
+            blobs = await asyncio.gather(*[_fetch_image_bytes(session, it.get("thumb", "")) for it in target])
+
+        for i, it in enumerate(target):
+            r = i // cols
+            c = i % cols
+            x0 = pad + c * (cell_w + pad)
+            y0 = header_h + pad + r * (cell_h + pad)
+
+            draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], outline=(230, 230, 230), width=1)
+
+            b = blobs[i]
+            if b:
+                try:
+                    img = Image.open(io.BytesIO(b))
+                    _paste_thumb_contain(canvas, img, x0, y0, cell_w, thumb_h)
+                except Exception:
+                    draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], fill=(245, 245, 245))
+            else:
                 draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], fill=(245, 245, 245))
-        else:
-            draw.rectangle([x0, y0, x0 + cell_w, y0 + thumb_h], fill=(245, 245, 245))
 
-        # Titles: if JP font missing -> skip to avoid □□
-        if font_ok:
-            tx = x0
-            ty = y0 + thumb_h + 6
-            lines = _wrap_text(draw, it.get("title", ""), font, cell_w, max_lines=2)
-            for li, line in enumerate(lines[:2]):
-                draw.text((tx, ty + li * 26), line, fill=(20, 20, 20), font=font)
+            # Text area
+            if font_ok and (show_title or show_channel):
+                tx = x0
+                ty = y0 + thumb_h + text_pad_top
+                if show_title:
+                    lines = _wrap_text(draw, it.get("title", ""), font, cell_w, max_lines=2)
+                    for li, line in enumerate(lines[:2]):
+                        draw.text((tx, ty + li * line_h), line, fill=(20, 20, 20), font=font)
+                    ty += title_lines * line_h
+                if show_channel:
+                    ch = (it.get("channel") or "").strip()
+                    if ch:
+                        ch_line = _wrap_text(draw, ch, font_small, cell_w, max_lines=1)[0]
+                        draw.text((tx, y0 + thumb_h + text_pad_top + title_lines * line_h), ch_line, fill=(120, 120, 120), font=font_small)
 
-            ch = (it.get("channel") or "").strip()
-            if ch:
-                ch_line = _wrap_text(draw, ch, font_small, cell_w, max_lines=1)[0]
-                draw.text((tx, y0 + thumb_h + title_h - 22), ch_line, fill=(120, 120, 120), font=font_small)
+        return canvas, out_h
+
+    if not separate:
+        rows = max(1, int(request.args.get("rows", "3") or 3))
+        cols = max(1, int(request.args.get("cols", "4") or 4))
+        n = int(request.args.get("n", str(rows * cols)) or (rows * cols))
+        n = max(1, min(n, len(items), rows * cols))
+        canvas, _h = await render_section(items, rows, cols, n, 16 / 9, None)
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG", optimize=True)
+        buf.seek(0)
+        return Response(buf.getvalue(), mimetype="image/png")
+
+    # separate shorts / normal
+    normal_items = [it for it in items if not it.get("is_short")]
+    short_items = [it for it in items if it.get("is_short")]
+
+    rows_norm = int(request.args.get("rows_norm", "3") or 3)
+    cols_norm = int(request.args.get("cols_norm", "4") or 4)
+    n_norm = int(request.args.get("n_norm", str(rows_norm * cols_norm)) or (rows_norm * cols_norm))
+    n_norm = max(0, min(n_norm, len(normal_items), rows_norm * cols_norm))
+
+    rows_short = int(request.args.get("rows_short", "3") or 3)
+    cols_short = int(request.args.get("cols_short", "2") or 2)
+    n_short = int(request.args.get("n_short", str(rows_short * cols_short)) or (rows_short * cols_short))
+    n_short = max(0, min(n_short, len(short_items), rows_short * cols_short))
+
+    # Render both sections, then compose vertically
+    norm_img, norm_h = await render_section(
+        normal_items, rows_norm, cols_norm, n_norm, 16 / 9,
+        f"通常動画  ({n_norm}/{len(normal_items)})" if normal_items else "通常動画 (0)"
+    )
+    short_img, short_h = await render_section(
+        short_items, rows_short, cols_short, n_short, 9 / 16,
+        f"ショート  ({n_short}/{len(short_items)})" if short_items else "ショート (0)"
+    )
+
+    total_h = max(1, norm_h + (pad if (norm_h and short_h) else 0) + short_h)
+    out = Image.new("RGB", (out_w, total_h), (255, 255, 255))
+    y = 0
+    if norm_h:
+        out.paste(norm_img, (0, 0))
+        y += norm_h
+    if norm_h and short_h:
+        # separator
+        draw = ImageDraw.Draw(out)
+        draw.line([(0, y + pad // 2), (out_w, y + pad // 2)], fill=(230, 230, 230), width=2)
+        y += pad
+    if short_h:
+        out.paste(short_img, (0, y))
 
     buf = io.BytesIO()
-    canvas.save(buf, format="PNG", optimize=True)
+    out.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return Response(buf.getvalue(), mimetype="image/png")
+
+
+# ------------------------------------------------------------
+# Comment page (unchanged here)
+#   You likely already have /comment implemented elsewhere.
+# ------------------------------------------------------------

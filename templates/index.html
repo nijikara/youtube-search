@@ -31,6 +31,7 @@
     .grid-btns button { margin-right: 6px; margin-bottom: 6px; }
     details summary { cursor: pointer; }
     .preview-img { max-width:100%; border:1px solid #ddd; }
+    .badge-soft { background:#f2f2f2; padding:2px 6px; border-radius:6px; }
   </style>
 
   <script>
@@ -123,13 +124,18 @@
           {% if font_hint %}
             <div class="small-muted">{{ font_hint }}</div>
           {% endif %}
-          <div class="small-muted">DEBUG share_sid={{ share_sid|default('') }}</div>
         </form>
       </details>
     </div>
 
     <div class="card-body p-0 mt-2">
-      <div class="p-2">検索結果: {{ sorce | length }}件</div>
+      <div class="p-2">
+        検索結果: {{ sorce | length }}件
+        {% if share_counts.total %}
+          <span class="badge-soft ml-2">通常 {{ share_counts.normal }}</span>
+          <span class="badge-soft ml-1">ショート {{ share_counts.short }}</span>
+        {% endif %}
+      </div>
 
       <table id="fav-table" class="table table-bordered table-sm">
         <thead>
@@ -186,18 +192,33 @@
     <hr>
     <div id="share-panel" class="card p-3"
          data-sid="{{ share_sid }}"
-         data-total="{{ sorce|length }}">
+         data-total="{{ share_counts.total }}"
+         data-normal="{{ share_counts.normal }}"
+         data-short="{{ share_counts.short }}">
       <div class="d-flex align-items-center justify-content-between">
         <h5 class="mb-2">X用まとめ画像</h5>
-        <div class="small-muted">合計 {{ sorce|length }} 件</div>
+        <div class="small-muted">合計 {{ share_counts.total }} 件（通常 {{ share_counts.normal }} / ショート {{ share_counts.short }}）</div>
       </div>
 
       <div class="form-row">
         <div class="col-auto">
-          <label class="small mb-1">対象件数 n（約数候補はこれに連動）</label>
-          <input id="share-n" type="number" class="form-control form-control-sm"
-                 min="1" max="{{ sorce|length }}"
-                 value="{{ (sorce|length) if (sorce|length)<=60 else 60 }}">
+          <label class="small mb-1">表示項目</label><br>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="opt-title" checked>
+            <label class="form-check-label small" for="opt-title">動画タイトル</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="opt-channel" checked>
+            <label class="form-check-label small" for="opt-channel">チャンネル名</label>
+          </div>
+        </div>
+
+        <div class="col-auto">
+          <label class="small mb-1">ショート</label><br>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="opt-separate" checked>
+            <label class="form-check-label small" for="opt-separate">通常/ショートを分ける</label>
+          </div>
         </div>
 
         <div class="col-auto">
@@ -219,11 +240,54 @@
         </div>
       </div>
 
-      <div class="mt-2">
-        <div class="small-muted mb-1">行×列（約数/近似候補）</div>
-        <div id="share-grid-list" class="grid-btns"></div>
-        <div id="share-reco" class="small-muted mt-2"></div>
-        <div class="small-muted mt-1">選択中：<span id="share-selected">-</span></div>
+      <!-- Mixed mode -->
+      <div id="mixed-controls" class="mt-3">
+        <div class="small-muted mb-1">（混在）対象件数 n（約数候補）</div>
+        <div class="form-row">
+          <div class="col-auto">
+            <input id="share-n" type="number" class="form-control form-control-sm"
+                   min="1" max="{{ share_counts.total }}"
+                   value="{{ share_counts.total if share_counts.total<=60 else 60 }}">
+          </div>
+        </div>
+        <div class="mt-2">
+          <div class="small-muted mb-1">行×列（約数/近似候補）</div>
+          <div id="share-grid-list" class="grid-btns"></div>
+          <div id="share-reco" class="small-muted mt-2"></div>
+          <div class="small-muted mt-1">選択中：<span id="share-selected">-</span></div>
+        </div>
+      </div>
+
+      <!-- Separate mode -->
+      <div id="sep-controls" class="mt-3" style="display:none;">
+        <div class="row">
+          <div class="col-md-6">
+            <h6>通常</h6>
+            <div class="small-muted mb-1">対象件数 n（約数候補）</div>
+            <input id="n-norm" type="number" class="form-control form-control-sm"
+                   min="0" max="{{ share_counts.normal }}"
+                   value="{{ share_counts.normal if share_counts.normal<=40 else 40 }}">
+            <div class="mt-2">
+              <div class="small-muted mb-1">行×列</div>
+              <div id="grid-norm" class="grid-btns"></div>
+              <div id="reco-norm" class="small-muted mt-2"></div>
+              <div class="small-muted mt-1">選択中：<span id="sel-norm">-</span></div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <h6>ショート</h6>
+            <div class="small-muted mb-1">対象件数 n（約数候補）</div>
+            <input id="n-short" type="number" class="form-control form-control-sm"
+                   min="0" max="{{ share_counts.short }}"
+                   value="{{ share_counts.short if share_counts.short<=20 else 20 }}">
+            <div class="mt-2">
+              <div class="small-muted mb-1">行×列</div>
+              <div id="grid-short" class="grid-btns"></div>
+              <div id="reco-short" class="small-muted mt-2"></div>
+              <div class="small-muted mt-1">選択中：<span id="sel-short">-</span></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="mt-3">
@@ -242,20 +306,46 @@
 
       const sid = panel.dataset.sid;
       const total = parseInt(panel.dataset.total, 10) || 0;
+      const normalTotal = parseInt(panel.dataset.normal, 10) || 0;
+      const shortTotal = parseInt(panel.dataset.short, 10) || 0;
 
-      const nInput = document.getElementById("share-n");
       const targetSel = document.getElementById("share-target");
       const wSel = document.getElementById("share-w");
+
+      const optTitle = document.getElementById("opt-title");
+      const optChannel = document.getElementById("opt-channel");
+      const optSeparate = document.getElementById("opt-separate");
+
+      const mixedControls = document.getElementById("mixed-controls");
+      const sepControls = document.getElementById("sep-controls");
+
+      // mixed
+      const nInput = document.getElementById("share-n");
       const list = document.getElementById("share-grid-list");
       const reco = document.getElementById("share-reco");
-      const preview = document.getElementById("share-preview");
-      const openBtn = document.getElementById("share-open");
       const selectedLabel = document.getElementById("share-selected");
 
-      // thumbs are 16:9
-      const CELL_RATIO = 16/9;
+      // separate
+      const nNorm = document.getElementById("n-norm");
+      const nShort = document.getElementById("n-short");
+      const gridNorm = document.getElementById("grid-norm");
+      const gridShort = document.getElementById("grid-short");
+      const recoNorm = document.getElementById("reco-norm");
+      const recoShort = document.getElementById("reco-short");
+      const selNorm = document.getElementById("sel-norm");
+      const selShort = document.getElementById("sel-short");
 
-      let selected = null; // [rows, cols]
+      const preview = document.getElementById("share-preview");
+      const openBtn = document.getElementById("share-open");
+
+      // thumbnail aspect ratios (width/height)
+      const CELL_RATIO_NORMAL = 16/9;
+      const CELL_RATIO_SHORT = 9/16;
+
+      // State
+      let selectedMixed = null; // [rows, cols]
+      let selectedNorm = null;  // [rows, cols]
+      let selectedShort = null; // [rows, cols]
 
       function exactPairs(n){
         const pairs = [];
@@ -285,15 +375,16 @@
         return out;
       }
 
-      function overallRatio(rows, cols){
-        return (cols/rows) * CELL_RATIO;
+      function overallRatio(rows, cols, cellRatio){
+        // grid width/height = (cols*cellW)/(rows*cellH) -> (cols/rows)*(cellW/cellH) = (cols/rows)*cellRatio
+        return (cols/rows) * cellRatio;
       }
 
-      function bestPair(pairs, target){
+      function bestPair(pairs, target, cellRatio){
         let best = null;
         let bestScore = 1e18;
         for(const [r,c] of pairs){
-          const ratio = overallRatio(r,c);
+          const ratio = overallRatio(r,c,cellRatio);
           const score = Math.abs(Math.log(ratio / target));
           if(score < bestScore){
             bestScore = score;
@@ -303,31 +394,130 @@
         return best;
       }
 
-      function setPreview(r, c, n, w){
-        selected = [r, c];
-        selectedLabel.textContent = `${r}×${c}`;
-        const url = `/share_image?sid=${encodeURIComponent(sid)}&rows=${r}&cols=${c}&n=${n}&w=${w}`;
+      function buildUrlMixed(rows, cols, n, w){
+        const showTitle = optTitle.checked ? "1":"0";
+        const showChannel = optChannel.checked ? "1":"0";
+        return `/share_image?sid=${encodeURIComponent(sid)}&rows=${rows}&cols=${cols}&n=${n}&w=${w}&show_title=${showTitle}&show_channel=${showChannel}`;
+      }
+
+      function buildUrlSeparate(rn, cn, nn, rs, cs, ns, w){
+        const showTitle = optTitle.checked ? "1":"0";
+        const showChannel = optChannel.checked ? "1":"0";
+        return `/share_image?sid=${encodeURIComponent(sid)}&separate=1`
+          + `&rows_norm=${rn}&cols_norm=${cn}&n_norm=${nn}`
+          + `&rows_short=${rs}&cols_short=${cs}&n_short=${ns}`
+          + `&w=${w}&show_title=${showTitle}&show_channel=${showChannel}`;
+      }
+
+      function setPreview(url){
         openBtn.href = url;
         preview.src = url;
         preview.scrollIntoView({behavior:"smooth", block:"start"});
-        renderButtons();
       }
 
-      let _pairs = [];
-      let _best = null;
-      let _approx = false;
-      let _n = 1;
-      let _w = 1600;
-      let _target = 16/9;
+      // ---------- Mixed UI ----------
+      function renderMixed(){
+        const totalCap = Math.max(1, total);
+        let n = parseInt(nInput.value, 10) || 1;
+        n = Math.max(1, Math.min(n, totalCap));
+        nInput.value = n;
 
-      function renderButtons(){
+        const target = parseFloat(targetSel.value);
+        const w = parseInt(wSel.value, 10) || 1600;
+
+        let pairs = exactPairs(n);
+        let approx = false;
+        if(pairs.length <= 2 && n > 12){
+          pairs = approxPairs(n);
+          approx = true;
+        }
+
+        const best = bestPair(pairs, target, CELL_RATIO_NORMAL);
+
+        if(best){
+          const ok = selectedMixed && pairs.some(([r,c])=> r===selectedMixed[0] && c===selectedMixed[1]);
+          if(!ok) selectedMixed = [best[0], best[1]];
+        } else {
+          selectedMixed = null;
+        }
+
+        selectedLabel.textContent = selectedMixed ? `${selectedMixed[0]}×${selectedMixed[1]}` : "-";
+        reco.textContent = best
+          ? `おすすめ: ${best[0]}×${best[1]}（推定 全体比率 ${best[2].toFixed(2)}:1）${approx ? " ※近似候補含む" : ""}`
+          : "";
+
         list.innerHTML = "";
-        _pairs.forEach(([r,c])=>{
-          const ratio = overallRatio(r,c);
+        pairs.forEach(([r,c])=>{
+          const ratio = overallRatio(r,c,CELL_RATIO_NORMAL);
           const btn = document.createElement("button");
           btn.type = "button";
 
-          const isBest = _best && r===_best[0] && c===_best[1];
+          const isBest = best && r===best[0] && c===best[1];
+          const isSel = selectedMixed && r===selectedMixed[0] && c===selectedMixed[1];
+
+          if (isSel && isBest) btn.className = "btn btn-sm btn-success";
+          else if (isSel) btn.className = "btn btn-sm btn-info";
+          else if (isBest) btn.className = "btn btn-sm btn-outline-success";
+          else btn.className = "btn btn-sm btn-outline-secondary";
+
+          btn.textContent = `${r}×${c}`;
+          btn.title = `推定比率 ${ratio.toFixed(2)}:1`;
+          btn.addEventListener("click", ()=>{
+            selectedMixed = [r,c];
+            selectedLabel.textContent = `${r}×${c}`;
+            setPreview(buildUrlMixed(r,c,n,w));
+            renderMixed(); // repaint buttons
+          });
+          list.appendChild(btn);
+        });
+
+        if(selectedMixed){
+          setPreview(buildUrlMixed(selectedMixed[0], selectedMixed[1], n, w));
+        }
+      }
+
+      // ---------- Separate UI ----------
+      function renderSeparateGroup(nVal, maxVal, cellRatio, selectedState, gridEl, recoEl, selEl){
+        let n = parseInt(nVal.value, 10) || 0;
+        n = Math.max(0, Math.min(n, maxVal));
+        nVal.value = n;
+
+        if(n === 0){
+          gridEl.innerHTML = "";
+          recoEl.textContent = "n=0（このセクションは出力しません）";
+          selEl.textContent = "-";
+          return { n, selected: null, best: null, pairs: [] };
+        }
+
+        const target = parseFloat(targetSel.value);
+        let pairs = exactPairs(n);
+        let approx = false;
+        if(pairs.length <= 2 && n > 12){
+          pairs = approxPairs(n);
+          approx = true;
+        }
+        const best = bestPair(pairs, target, cellRatio);
+
+        let selected = selectedState;
+        if(best){
+          const ok = selected && pairs.some(([r,c])=> r===selected[0] && c===selected[1]);
+          if(!ok) selected = [best[0], best[1]];
+        } else {
+          selected = null;
+        }
+
+        selEl.textContent = selected ? `${selected[0]}×${selected[1]}` : "-";
+        recoEl.textContent = best
+          ? `おすすめ: ${best[0]}×${best[1]}（推定 全体比率 ${best[2].toFixed(2)}:1）${approx ? " ※近似候補含む" : ""}`
+          : "";
+
+        gridEl.innerHTML = "";
+        pairs.forEach(([r,c])=>{
+          const ratio = overallRatio(r,c,cellRatio);
+          const btn = document.createElement("button");
+          btn.type = "button";
+
+          const isBest = best && r===best[0] && c===best[1];
           const isSel = selected && r===selected[0] && c===selected[1];
 
           if (isSel && isBest) btn.className = "btn btn-sm btn-success";
@@ -337,51 +527,73 @@
 
           btn.textContent = `${r}×${c}`;
           btn.title = `推定比率 ${ratio.toFixed(2)}:1`;
-          btn.addEventListener("click", ()=> setPreview(r,c,_n,_w));
-          list.appendChild(btn);
+          btn.addEventListener("click", ()=>{
+            selected = [r,c];
+            selEl.textContent = `${r}×${c}`;
+            // caller will re-render + set preview
+            const ev = new CustomEvent("gridSelected", { detail: { selected } });
+            gridEl.dispatchEvent(ev);
+          });
+          gridEl.appendChild(btn);
         });
+
+        return { n, selected, best, pairs };
       }
 
-      function render(){
-        _n = parseInt(nInput.value, 10) || 1;
-        _n = Math.max(1, Math.min(_n, total));
-        nInput.value = _n;
+      function renderSeparate(){
+        const w = parseInt(wSel.value, 10) || 1600;
 
-        _target = parseFloat(targetSel.value);
-        _w = parseInt(wSel.value, 10) || 1600;
+        // normal
+        const norm = renderSeparateGroup(
+          nNorm, normalTotal, CELL_RATIO_NORMAL,
+          selectedNorm, gridNorm, recoNorm, selNorm
+        );
+        selectedNorm = norm.selected;
 
-        _pairs = exactPairs(_n);
-        _approx = false;
-        if(_pairs.length <= 2 && _n > 12){
-          _pairs = approxPairs(_n);
-          _approx = true;
-        }
+        // short
+        const sh = renderSeparateGroup(
+          nShort, shortTotal, CELL_RATIO_SHORT,
+          selectedShort, gridShort, recoShort, selShort
+        );
+        selectedShort = sh.selected;
 
-        _best = bestPair(_pairs, _target);
+        const rn = selectedNorm ? selectedNorm[0] : 1;
+        const cn = selectedNorm ? selectedNorm[1] : 1;
+        const rs = selectedShort ? selectedShort[0] : 1;
+        const cs = selectedShort ? selectedShort[1] : 1;
 
-        reco.textContent = _best
-          ? `おすすめ: ${_best[0]}×${_best[1]}（推定 全体比率 ${_best[2].toFixed(2)}:1）${_approx ? " ※近似候補含む" : ""}`
-          : "";
-
-        if(!_best){
-          selected = null;
-        } else {
-          const ok = selected && _pairs.some(([r,c])=> r===selected[0] && c===selected[1]);
-          if(!ok) selected = [_best[0], _best[1]];
-        }
-
-        selectedLabel.textContent = selected ? `${selected[0]}×${selected[1]}` : "-";
-        renderButtons();
-
-        if(selected){
-          setPreview(selected[0], selected[1], _n, _w);
-        }
+        const url = buildUrlSeparate(rn, cn, norm.n, rs, cs, sh.n, w);
+        setPreview(url);
       }
 
-      nInput.addEventListener("change", render);
-      targetSel.addEventListener("change", render);
-      wSel.addEventListener("change", render);
-      render();
+      gridNorm.addEventListener("gridSelected", (e)=>{
+        selectedNorm = e.detail.selected;
+        renderSeparate();
+      });
+      gridShort.addEventListener("gridSelected", (e)=>{
+        selectedShort = e.detail.selected;
+        renderSeparate();
+      });
+
+      function modeChanged(){
+        const sep = optSeparate.checked;
+        mixedControls.style.display = sep ? "none" : "";
+        sepControls.style.display = sep ? "" : "none";
+        if(sep) renderSeparate(); else renderMixed();
+      }
+
+      // listeners
+      optTitle.addEventListener("change", modeChanged);
+      optChannel.addEventListener("change", modeChanged);
+      optSeparate.addEventListener("change", modeChanged);
+      nInput.addEventListener("change", renderMixed);
+      nNorm.addEventListener("change", renderSeparate);
+      nShort.addEventListener("change", renderSeparate);
+      targetSel.addEventListener("change", modeChanged);
+      wSel.addEventListener("change", modeChanged);
+
+      // init
+      modeChanged();
     })();
     </script>
     {% endif %}
