@@ -36,6 +36,7 @@
 </head>
 
 <body>
+  {% set q = quota if quota is defined else {'estimate_used': '-', 'reset_at_jst': '-'} %}
 <div class="container-fluid py-3">
 
   <div class="d-flex align-items-start flex-wrap">
@@ -48,7 +49,7 @@
       <div class="h5 mb-1"><a href="{{ watch_url }}" target="_blank">{{ video_title or 'Comments' }}</a></div>
       {% if channel_title %}<div class="small-muted">{{ channel_title }}</div>{% endif %}
       <div class="small-muted">mode: {{ mode }}{% if mode=='replies' and parent_id %} / parent: {{ parent_id }}{% endif %}</div>
-      <div class="small-muted">quota(推定): used {{ quota.estimate_used }} / reset {{ quota.reset_at_jst }}</div>
+      <div class="small-muted">quota(推定): used {{ q.estimate_used }} / reset {{ q.reset_at_jst }}</div>
     </div>
   </div>
 

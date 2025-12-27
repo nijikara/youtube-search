@@ -29,6 +29,59 @@ if YT_BASE_URL and not YT_BASE_URL.endswith("/"):
 JST = timezone(timedelta(hours=9))
 
 # ---------------------------
+# Quota (推定) 表示用: YouTube Data API は日次クォータ（通常 10,000 units）が
+# 「米国太平洋時間の 0:00」でリセットされます。
+# ※この値はアプリ内部の“推定”で、正確な残量はAPIからは取得できません。
+# ---------------------------
+try:
+    from zoneinfo import ZoneInfo  # py3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
+_YT_QUOTA_LIMIT = int(os.environ.get("YT_QUOTA_LIMIT") or 10000)
+_quota_used_estimate = 0
+_quota_used_by_method = {}
+
+# ざっくり代表値（必要なら増やす）
+_QUOTA_COST = {
+    "search.list": 100,
+    "videos.list": 1,
+    "channels.list": 1,
+    "commentThreads.list": 1,
+    "comments.list": 1,
+}
+
+def quota_add(method: str):
+    global _quota_used_estimate
+    cost = int(_QUOTA_COST.get(method, 1))
+    _quota_used_estimate += cost
+    _quota_used_by_method[method] = int(_quota_used_by_method.get(method, 0)) + cost
+
+def _quota_reset_at_jst_str() -> str:
+    # 次の「米国太平洋時間 0:00」をJSTに変換して文字列化
+    try:
+        if ZoneInfo is None:
+            return "-"
+        pt = ZoneInfo("America/Los_Angeles")
+        now_pt = datetime.now(pt)
+        reset_pt = (now_pt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        reset_jst = reset_pt.astimezone(JST)
+        return reset_jst.strftime("%Y-%m-%d %H:%M:%S JST")
+    except Exception:
+        return "-"
+
+def quota_snapshot_dict() -> dict:
+    remaining = max(0, _YT_QUOTA_LIMIT - _quota_used_estimate)
+    return {
+        "estimate_used": _quota_used_estimate,
+        "estimate_remaining": remaining,
+        "limit": _YT_QUOTA_LIMIT,
+        "reset_at_jst": _quota_reset_at_jst_str(),
+        "by_method": _quota_used_by_method,
+    }
+
+
+# ---------------------------
 # Cache (search result)
 # ---------------------------
 CACHE: Dict[Tuple[Any, ...], Tuple[float, Any]] = {}
@@ -501,6 +554,7 @@ async def render_share_image(
 async def home():
     return await render_template(
         "index.html",
+        quota=quota_snapshot_dict(),
         title="search_youtube",
         form=default_form(),
         normal_rows=[],
@@ -605,6 +659,7 @@ async def scraping():
 
     return await render_template(
         "index.html",
+        quota=quota_snapshot_dict(),
         title="search_youtube",
         form=form,
         normal_rows=normal_rows,
@@ -636,6 +691,7 @@ async def comment():
         error = "Missing API_KEY"
         return await render_template(
             "comment.html",
+            quota=quota_snapshot_dict(),
             title="Comments",
             error=error,
             video_id=video_id,
@@ -650,6 +706,9 @@ async def comment():
         )
 
     async def yt_get_json(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        # quota(推定)カウント
+        _m = {'search':'search.list','videos':'videos.list','channels':'channels.list','commentThreads':'commentThreads.list','comments':'comments.list'}
+        quota_add(_m.get(endpoint, endpoint + '.list'))
         url = YT_BASE_URL + endpoint + "?" + urllib.parse.urlencode(params)
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -752,6 +811,7 @@ async def comment():
 
     return await render_template(
         "comment.html",
+        quota=quota_snapshot_dict(),
         title="Comments",
         error=error,
         video_id=video_id,
